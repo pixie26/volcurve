@@ -13,6 +13,9 @@
     chartCount: 1,
     hoverSyncing: false,
     zoomSyncing: false,
+    seriesIndex: new Map(),
+    operandSignature: "",
+    hoverDate: null,
   };
 
   const TYPE_LABELS = {
@@ -20,7 +23,11 @@
     realized_vol: "Realized volatility",
     spot: "Spot · 原始未复权",
     forward: "Forward",
+    derived: "Derived · 指标运算",
   };
+  const OPERATOR_SYMBOLS = { add: "＋", subtract: "−", multiply: "×", divide: "÷" };
+  const VOL_TYPES = new Set(["implied_vol", "realized_vol"]);
+  const PRICE_TYPES = new Set(["spot", "forward"]);
   const PALETTE = ["#0f7554", "#3557a4", "#d66a2d", "#8c6bb1", "#bf3d5d", "#4e8f9c", "#8e7b28"];
 
   function defaultDraft(type) {
@@ -40,6 +47,9 @@
       rvAlignment: "trailing",
       volatilityConvention: "bsVol",
       layout: "matrix",
+      operandA: "",
+      operator: "subtract",
+      operandB: "",
     };
   }
 
@@ -50,6 +60,7 @@
       next.chartLane = indicatorState.draft.chartLane;
       indicatorState.draft = next;
       indicatorState.discovery = null;
+      renderScopeFields();
       renderIndicatorConfig();
     });
     $("addIndicatorButton").addEventListener("click", addIndicator);
@@ -66,17 +77,13 @@
     for (const id of ["startDate", "endDate"]) {
       $(id).addEventListener("change", invalidateIndicators);
     }
-    $("instrumentCode").addEventListener("change", () => {
-      indicatorState.draft.instrumentCode = $("instrumentCode").value.trim();
-      persistWorkspace();
-      renderIndicatorConfig();
-    });
+    bindScopeFields();
     document.querySelectorAll('input[name="queryKind"]').forEach((input) => {
       input.addEventListener("change", syncWorkspaceMode);
     });
     window.addEventListener("volcurve:capabilities", () => {
       renderIndicatorConfig();
-      renderIndicatorChart();
+      refreshWorkspaceViews({ details: false });
       if (indicatorState.restorePending) {
         indicatorState.restorePending = false;
         refreshActiveIndicators();
@@ -85,8 +92,39 @@
     restoreWorkspace();
     syncWorkspaceMode();
     renderIndicatorConfig();
-    renderSavedIndicators();
-    renderIndicatorChart();
+  }
+
+  // The underlying and the target chart lane live above the indicator builder so a new
+  // indicator is described top-down: date range → underlying + lane → indicator definition.
+  function bindScopeFields() {
+    const instrument = document.querySelector('[data-draft="instrumentCode"]');
+    const lane = document.querySelector('[data-draft="chartLane"]');
+    const update = (field) => {
+      indicatorState.draft[field.dataset.draft] = field.value.trim();
+      persistWorkspace();
+      renderIndicatorConfig();
+    };
+    if (instrument) {
+      instrument.addEventListener("change", () => update(instrument));
+      instrument.addEventListener("input", () => { indicatorState.draft.instrumentCode = instrument.value.trim(); });
+    }
+    if (lane) lane.addEventListener("change", () => update(lane));
+  }
+
+  function renderScopeFields() {
+    const compare = document.querySelector('input[name="queryKind"]:checked')?.value === "compare";
+    const lane = $("draftChartLane");
+    if (lane) {
+      lane.innerHTML = Array.from({ length: indicatorState.chartCount }, (_, index) => index + 1)
+        .map((value) => `<option value="${value}">坐标 ${value}</option>`).join("");
+      lane.value = indicatorState.draft.chartLane;
+      if (!lane.value) {
+        lane.value = "1";
+        indicatorState.draft.chartLane = "1";
+      }
+    }
+    $("chartLaneField").classList.toggle("is-hidden", !compare);
+    $("underlyingField").classList.toggle("is-hidden", compare && indicatorState.draft.type === "derived");
   }
 
   function syncWorkspaceMode() {
@@ -107,7 +145,8 @@
         $("welcomeState").classList.remove("is-hidden");
       }
     }
-    renderIndicatorChart();
+    renderScopeFields();
+    refreshWorkspaceViews({ details: false });
   }
 
   function restoreWorkspace() {
@@ -132,7 +171,7 @@
           type,
           config: normalizeStoredConfig(type, storedItem.config, stored.scope?.instrumentCode),
           active: storedItem.active !== false,
-          status: "stale",
+          status: type === "derived" ? "ready" : "stale",
           response: null,
           request: null,
           error: null,
@@ -193,21 +232,24 @@
     const config = $("indicatorConfig");
     if (!config) return;
     let html = "";
-    const placement = indicatorPlacementFields(draft);
     if (draft.type === "implied_vol") {
-      html = `${placement}${requestSystemFields(draft)}${maturityModeField(draft)}${maturityValueField(draft)}${strikeFields(draft)}${listedDiscoveryPanel(draft)}`;
+      html = `${requestSystemFields(draft)}${maturityModeField(draft)}${maturityValueField(draft)}${strikeFields(draft)}${listedDiscoveryPanel(draft)}`;
       $("indicatorBuilderNote").textContent = "IV 使用精确 maturity + strike 坐标。Vol convention 与 layout 都是 BNP 请求字段；缺失值不会换成邻近坐标。";
     } else if (draft.type === "realized_vol") {
-      html = `${placement}${requestSystemFields(draft)}<div class="field-grid two config-grid">
+      html = `${requestSystemFields(draft)}<div class="field-grid two config-grid">
         <label class="field"><span>Window · sessions</span><input data-draft="rvWindow" type="number" min="2" step="1" list="rvWindowOptions" value="${escapeHtml(draft.rvWindow)}" /></label>
         <label class="field"><span>Alignment</span><select data-draft="rvAlignment"><option value="trailing" ${draft.rvAlignment === "trailing" ? "selected" : ""}>Trailing</option><option value="forward" ${draft.rvAlignment === "forward" ? "selected" : ""}>Forward</option></select></label>
       </div>`;
       $("indicatorBuilderNote").textContent = "RV 接受任意 ≥2 的整数窗口，不取最近档位。Spot 来自 BNP IV 响应，因此独立 RV 会明确使用 3M K/F 100% 作为取数载体；该坐标不进入 RV 公式。";
     } else if (draft.type === "spot") {
-      html = `${placement}${requestSystemFields(draft)}<div class="system-default-card"><strong>无需额外参数</strong><span>BNP 原始未复权 spot / price-return source</span></div>`;
+      html = `${requestSystemFields(draft)}<div class="system-default-card"><strong>无需额外参数</strong><span>BNP 原始未复权 spot / price-return source</span></div>`;
       $("indicatorBuilderNote").textContent = "当前 Cortex 数据路径把 spot 放在 IV response 内；系统用 3M K/F 100% 请求承载 spot，并在指标卡中明示。不会把该参考 IV 当作用户选择的指标。";
+    } else if (draft.type === "derived") {
+      ensureDerivedDefaults(draft);
+      html = derivedOperandFields(draft);
+      $("indicatorBuilderNote").textContent = "运算在浏览器内按共同观察日逐日进行，不发送新的 BNP 请求。任一操作数缺失该日期或该日期无有效值时，结果保持为空，不插值、不前向填充；除数为 0 同样保持为空。";
     } else {
-      html = `${placement}${requestSystemFields(draft)}${maturityModeField(draft)}${maturityValueField(draft)}${listedDiscoveryPanel(draft)}`;
+      html = `${requestSystemFields(draft)}${maturityModeField(draft)}${maturityValueField(draft)}${listedDiscoveryPanel(draft)}`;
       $("indicatorBuilderNote").textContent = "Forward 按所选 maturity 读取 BNP forward curve；系统用 K/F 100% 作为响应载体。该 moneyness 不改变同一期限的 forward 值。";
     }
     config.innerHTML = html;
@@ -215,13 +257,37 @@
     bindIndicatorDiscovery();
   }
 
-  function indicatorPlacementFields(draft) {
-    const chartOptions = Array.from({ length: indicatorState.chartCount }, (_, index) => index + 1)
-      .map((lane) => `<option value="${lane}" ${String(lane) === draft.chartLane ? "selected" : ""}>坐标 ${lane}</option>`).join("");
-    return `<div class="field-grid two config-grid indicator-placement-fields">
-      <label class="field"><span>Indicator instrument</span><input data-draft="instrumentCode" value="${escapeHtml(draft.instrumentCode)}" list="instrumentOptions" autocomplete="off" /><small>每个 indicator 独立保存标的。</small></label>
-      <label class="field"><span>Chart</span><select data-draft="chartLane">${chartOptions}</select><small>可在保存卡片中随时移动。</small></label>
-    </div>`;
+  function ensureDerivedDefaults(draft) {
+    const ids = indicatorState.items.map((item) => String(item.id));
+    if (!ids.includes(draft.operandA)) draft.operandA = ids[0] || "";
+    if (!ids.includes(draft.operandB)) draft.operandB = ids[1] || ids[0] || "";
+    if (!Object.hasOwn(OPERATOR_SYMBOLS, draft.operator)) draft.operator = "subtract";
+  }
+
+  function derivedOperandFields(draft) {
+    if (!indicatorState.items.length) {
+      return '<div class="system-default-card"><strong>还没有可用的操作数</strong><span>先添加至少一个已保存 indicator，再用它们组合出新指标。</span></div>';
+    }
+    const operandOptions = (selected) => indicatorState.items
+      .map((item) => `<option value="${item.id}" ${String(item.id) === String(selected) ? "selected" : ""}>${escapeHtml(indicatorLabel(item))}</option>`).join("");
+    const operatorOptions = Object.entries(OPERATOR_SYMBOLS)
+      .map(([key, symbol]) => `<option value="${key}" ${draft.operator === key ? "selected" : ""}>${symbol}</option>`).join("");
+    return `<div class="derived-operands">
+      <label class="field"><span>Indicator A</span><select data-draft="operandA">${operandOptions(draft.operandA)}</select></label>
+      <label class="field operator-field"><span>运算</span><select data-draft="operator">${operatorOptions}</select></label>
+      <label class="field"><span>Indicator B</span><select data-draft="operandB">${operandOptions(draft.operandB)}</select></label>
+    </div><p class="derived-preview">${escapeHtml(derivedPreviewLabel(draft))}</p>`;
+  }
+
+  function derivedPreviewLabel(draft) {
+    const left = itemById(draft.operandA);
+    const right = itemById(draft.operandB);
+    if (!left || !right) return "请选择两个已保存的 indicator。";
+    return `${indicatorLabel(left)}  ${OPERATOR_SYMBOLS[draft.operator]}  ${indicatorLabel(right)}`;
+  }
+
+  function itemById(id) {
+    return indicatorState.items.find((item) => String(item.id) === String(id)) || null;
   }
 
   function requestSystemFields(draft) {
@@ -288,6 +354,10 @@
         if (["maturityMode", "strikeKind"].includes(field.dataset.draft)) {
           indicatorState.discovery = null;
           renderIndicatorConfig();
+        }
+        if (["operandA", "operator", "operandB"].includes(field.dataset.draft)) {
+          const preview = document.querySelector(".derived-preview");
+          if (preview) preview.textContent = derivedPreviewLabel(indicatorState.draft);
         }
       };
       field.addEventListener("change", update);
@@ -410,26 +480,43 @@
       type: indicatorState.draft.type,
       config: structuredClone(indicatorState.draft),
       active: true,
-      status: "queued",
+      status: initialStatus(indicatorState.draft.type),
       response: null,
       request: null,
       error: null,
     };
     indicatorState.items.push(item);
-    indicatorState.selectedDetailId = item.id;
     persistWorkspace();
+    if (item.type === "derived") {
+      refreshWorkspaceViews();
+      return;
+    }
+    indicatorState.selectedDetailId = item.id;
     renderSavedIndicators();
     fetchIndicator(item);
   }
 
+  function initialStatus(type) {
+    return type === "derived" ? "ready" : "queued";
+  }
+
   function validateScope(config) {
     if (!state.capabilities) throw new Error("Capability registry 尚未载入，请稍后重试。");
-    if (!config?.instrumentCode?.trim()) throw new Error("请输入该 indicator 的 instrument code。");
+    if (config?.type !== "derived" && !config?.instrumentCode?.trim()) {
+      throw new Error("请输入该 indicator 的 instrument code。");
+    }
     if (!$("startDate").value || !$("endDate").value) throw new Error("请选择完整日期范围。");
     if ($("startDate").value > $("endDate").value) throw new Error("开始日期不能晚于结束日期。");
   }
 
   function validateDraft(draft) {
+    if (draft.type === "derived") {
+      const left = itemById(draft.operandA);
+      const right = itemById(draft.operandB);
+      if (!left || !right) throw new Error("请选择两个已保存的 indicator 作为操作数。");
+      if (!Object.hasOwn(OPERATOR_SYMBOLS, draft.operator)) throw new Error("请选择合法的运算符。");
+      return;
+    }
     if (["implied_vol", "forward"].includes(draft.type)) {
       if (draft.maturityMode === "sliding") {
         const supported = draft.strikeKind === "delta"
@@ -511,11 +598,13 @@
 
   async function fetchIndicator(item) {
     if (!item.active || !indicatorState.items.some((candidate) => candidate.id === item.id)) return;
+    if (item.type === "derived") {
+      refreshWorkspaceViews();
+      return;
+    }
     item.status = "loading";
     item.error = null;
-    renderSavedIndicators();
-    renderIndicatorChart();
-    renderIndicatorDetails();
+    refreshWorkspaceViews();
     const started = performance.now();
     try {
       validateScope(item.config);
@@ -541,27 +630,116 @@
       item.error = error.payload?.message || error.message || "指标加载失败";
       item.response = null;
     }
-    renderSavedIndicators();
-    renderIndicatorChart();
-    renderIndicatorDetails();
+    refreshWorkspaceViews();
   }
 
   async function refreshActiveIndicators() {
     hideIndicatorFormError();
-    await Promise.all(indicatorState.items.filter((item) => item.active).map(fetchIndicator));
+    const fetchable = indicatorState.items.filter((item) => item.active && item.type !== "derived");
+    await Promise.all(fetchable.map(fetchIndicator));
+    refreshWorkspaceViews();
   }
 
   function invalidateIndicators() {
     indicatorState.discovery = null;
     for (const item of indicatorState.items) {
+      if (item.type === "derived") continue;
       item.status = "stale";
       item.response = null;
       item.error = null;
     }
     persistWorkspace();
+    refreshWorkspaceViews();
+  }
+
+  // Every view reads from one recomputed series index so derived indicators, the chart
+  // stack, the cross-chart readout and the statistics table can never drift apart.
+  function refreshWorkspaceViews({ details = true } = {}) {
+    refreshSeriesIndex();
     renderSavedIndicators();
     renderIndicatorChart();
-    renderIndicatorDetails();
+    renderIndicatorStats();
+    renderCrosshairReadout(indicatorState.hoverDate);
+    if (details) renderIndicatorDetails();
+  }
+
+  function refreshSeriesIndex() {
+    const index = new Map();
+    for (const item of indicatorState.items) resolveSeries(item, index, new Set());
+    indicatorState.seriesIndex = index;
+  }
+
+  function resolveSeries(item, index, stack) {
+    if (index.has(item.id)) return index.get(item.id);
+    let entry;
+    if (item.type === "derived") {
+      entry = computeDerivedSeries(item, index, stack);
+      item.status = entry.error ? "error" : "ready";
+      item.error = entry.error;
+    } else if (item.status === "ready" && item.response) {
+      const key = indicatorValueKey(item.type);
+      entry = { points: item.response.series.map((point) => ({ date: point.date, value: numericValue(point[key]) })), error: null };
+    } else {
+      entry = { points: null, error: item.error || indicatorStatus(item) };
+    }
+    entry.byDate = entry.points ? new Map(entry.points.map((point) => [point.date, point.value])) : new Map();
+    index.set(item.id, entry);
+    return entry;
+  }
+
+  function computeDerivedSeries(item, index, stack) {
+    if (stack.has(item.id)) return { points: null, error: "指标运算的引用形成了循环。" };
+    const config = item.config;
+    const left = itemById(config.operandA);
+    const right = itemById(config.operandB);
+    if (!left || !right) return { points: null, error: "引用的 indicator 已不存在，无法计算。" };
+    if (!Object.hasOwn(OPERATOR_SYMBOLS, config.operator)) return { points: null, error: "运算符不合法。" };
+    const nested = new Set(stack).add(item.id);
+    const leftEntry = resolveSeries(left, index, nested);
+    const rightEntry = resolveSeries(right, index, nested);
+    if (!leftEntry.points) return { points: null, error: `操作数「${indicatorLabel(left)}」不可用：${leftEntry.error}` };
+    if (!rightEntry.points) return { points: null, error: `操作数「${indicatorLabel(right)}」不可用：${rightEntry.error}` };
+    const points = leftEntry.points
+      .filter((point) => rightEntry.byDate.has(point.date))
+      .map((point) => ({ date: point.date, value: applyOperator(config.operator, point.value, rightEntry.byDate.get(point.date)) }));
+    if (!points.length) return { points: null, error: "两个操作数在当前日期范围内没有共同观察日。" };
+    return { points, error: null };
+  }
+
+  function applyOperator(operator, left, right) {
+    if (left === null || right === null) return null;
+    if (operator === "add") return left + right;
+    if (operator === "subtract") return left - right;
+    if (operator === "multiply") return left * right;
+    if (right === 0) return null;
+    const value = left / right;
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function numericValue(value) {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  function indicatorUnit(item, depth = 0) {
+    if (item.type !== "derived") {
+      if (VOL_TYPES.has(item.type)) return "vol";
+      return PRICE_TYPES.has(item.type) ? "price" : "mixed";
+    }
+    if (depth > MAX_CHARTS * 2) return "mixed";
+    if (["multiply", "divide"].includes(item.config.operator)) return "ratio";
+    const left = itemById(item.config.operandA);
+    const right = itemById(item.config.operandB);
+    if (!left || !right) return "mixed";
+    const leftUnit = indicatorUnit(left, depth + 1);
+    return leftUnit === indicatorUnit(right, depth + 1) ? leftUnit : "mixed";
+  }
+
+  function unitSuffix(item) {
+    return indicatorUnit(item) === "vol" ? "%" : "";
+  }
+
+  function itemColor(item) {
+    return PALETTE[(item.id - 1) % PALETTE.length];
   }
 
   function handleSavedIndicatorChange(event) {
@@ -571,8 +749,7 @@
       if (!item) return;
       item.config.chartLane = laneSelect.value;
       persistWorkspace();
-      renderSavedIndicators();
-      renderIndicatorChart();
+      refreshWorkspaceViews({ details: false });
       return;
     }
     const toggle = event.target.closest("[data-indicator-toggle]");
@@ -581,9 +758,8 @@
     if (!item) return;
     item.active = toggle.checked;
     persistWorkspace();
-    renderSavedIndicators();
-    renderIndicatorChart();
-    if (item.active && !item.response) fetchIndicator(item);
+    refreshWorkspaceViews({ details: false });
+    if (item.active && item.type !== "derived" && !item.response) fetchIndicator(item);
   }
 
   function addChartLane() {
@@ -591,9 +767,8 @@
     indicatorState.chartCount += 1;
     indicatorState.draft.chartLane = String(indicatorState.chartCount);
     persistWorkspace();
-    renderIndicatorConfig();
-    renderSavedIndicators();
-    renderIndicatorChart();
+    renderScopeFields();
+    refreshWorkspaceViews({ details: false });
   }
 
   function handleChartStackClick(event) {
@@ -613,9 +788,8 @@
     if (draftLane > lane) indicatorState.draft.chartLane = String(draftLane - 1);
     else if (draftLane === lane) indicatorState.draft.chartLane = String(Math.min(lane, indicatorState.chartCount));
     persistWorkspace();
-    renderIndicatorConfig();
-    renderSavedIndicators();
-    renderIndicatorChart();
+    renderScopeFields();
+    refreshWorkspaceViews({ details: false });
   }
 
   function handleSavedIndicatorClick(event) {
@@ -630,16 +804,22 @@
     const deleteButton = event.target.closest("[data-indicator-delete]");
     if (!deleteButton) return;
     const deletedId = Number(deleteButton.dataset.indicatorDelete);
+    const dependents = indicatorState.items.filter((item) => item.type === "derived"
+      && [item.config.operandA, item.config.operandB].some((operand) => String(operand) === String(deletedId)));
+    if (dependents.length) {
+      showIndicatorFormError(`该 indicator 被 ${dependents.length} 个运算指标引用（${dependents.map(indicatorLabel).join("；")}），请先删除这些运算指标。`);
+      return;
+    }
+    hideIndicatorFormError();
     indicatorState.items = indicatorState.items.filter((item) => item.id !== deletedId);
     if (indicatorState.selectedDetailId === deletedId) indicatorState.selectedDetailId = null;
     persistWorkspace();
-    renderSavedIndicators();
-    renderIndicatorChart();
-    renderIndicatorDetails();
+    refreshWorkspaceViews();
   }
 
   function renderSavedIndicators() {
     $("indicatorCount").textContent = String(indicatorState.items.length);
+    syncDerivedOperandOptions();
     if (!indicatorState.items.length) {
       $("savedIndicators").innerHTML = '<p class="empty-list-copy">尚未添加指标。</p>';
       return;
@@ -652,8 +832,27 @@
     </article>`).join("");
   }
 
-  function indicatorLabel(item) {
+  // Keeps the derived operand dropdowns in step with the saved list without re-rendering
+  // the whole config panel on every status change.
+  function syncDerivedOperandOptions() {
+    if (indicatorState.draft.type !== "derived") return;
+    const signature = indicatorState.items.map((item) => `${item.id}:${indicatorLabel(item)}`).join("|");
+    if (signature === indicatorState.operandSignature) return;
+    indicatorState.operandSignature = signature;
+    renderIndicatorConfig();
+  }
+
+  function indicatorLabel(item, depth = 0) {
     const config = item.config;
+    if (item.type === "derived") {
+      if (depth > MAX_CHARTS * 2) return "指标运算";
+      const left = itemById(config.operandA);
+      const right = itemById(config.operandB);
+      const symbol = OPERATOR_SYMBOLS[config.operator] || "?";
+      const leftLabel = left ? indicatorLabel(left, depth + 1) : "已删除";
+      const rightLabel = right ? indicatorLabel(right, depth + 1) : "已删除";
+      return `(${leftLabel}) ${symbol} (${rightLabel})`;
+    }
     const prefix = `${config.instrumentCode} · `;
     if (item.type === "implied_vol") return `${prefix}IV · ${coordinateLabel(config)}`;
     if (item.type === "realized_vol") return `${prefix}RV · ${config.rvWindow} sessions · ${config.rvAlignment}`;
@@ -676,6 +875,7 @@
   function indicatorDetail(item) {
     const wire = `${item.config.volatilityConvention} · ${item.config.layout}`;
     const placement = `坐标 ${item.config.chartLane}`;
+    if (item.type === "derived") return `${placement} · 浏览器本地按共同观察日计算 · 不发送新的 BNP 请求`;
     if (item.type === "realized_vol") return `${placement} · price-return RV · spot via reference 3M K/F 100% · ${wire} carrier`;
     if (item.type === "spot") return `${placement} · BNP spot · 未复权 · reference 3M K/F 100% · ${wire} carrier`;
     if (item.type === "forward") return `${placement} · BNP forward curve · K/F 100% response carrier · ${wire}`;
@@ -683,6 +883,7 @@
   }
 
   function indicatorStatus(item) {
+    if (item.type === "derived" && item.status === "ready") return "已计算";
     return { queued: "等待加载", loading: "加载中", ready: "已加载", stale: "范围已变化，待刷新", error: "加载失败" }[item.status] || item.status;
   }
 
@@ -690,7 +891,7 @@
     if (!window.Plotly || !$("indicatorCharts")) return;
     renderChartShells();
     const active = indicatorState.items.filter((item) => item.active);
-    const ready = active.filter((item) => item.status === "ready" && item.response);
+    const ready = active.filter((item) => indicatorState.seriesIndex.get(item.id)?.points);
     const start = $("startDate").value;
     const end = $("endDate").value;
     for (let lane = 1; lane <= indicatorState.chartCount; lane += 1) {
@@ -718,15 +919,15 @@
         font: { family: "Inter, Microsoft YaHei, sans-serif", size: 10, color: "#536159" },
         xaxis: { title: "Observation date", type: "date", range: start && end ? [start, end] : undefined, gridcolor: "#e8ebe4", showspikes: true, spikemode: "across", spikesnap: "cursor", spikecolor: "#6f7f76", spikethickness: 1 },
         yaxis: { title: "Volatility (%)", gridcolor: "#e8ebe4", zeroline: false },
-        yaxis2: { title: "Price / forward", overlaying: "y", side: "right", showgrid: false, zeroline: false },
+        yaxis2: { title: "Price / ratio", overlaying: "y", side: "right", showgrid: false, zeroline: false },
         annotations,
         uirevision: `chart-${lane}-${start}-${end}`,
       }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] })).then(() => bindChartSync(div));
     }
-    const instruments = new Set(indicatorState.items.map((item) => item.config.instrumentCode));
+    const instruments = new Set(indicatorState.items.filter((item) => item.type !== "derived").map((item) => item.config.instrumentCode));
     $("timeseriesStatus").textContent = `${indicatorState.chartCount}/${MAX_CHARTS} charts · ${active.length} active`;
     $("timeseriesTitle").textContent = indicatorState.items.length ? `${instruments.size} instruments · ${indicatorState.items.length} indicators` : "空白时序图";
-    $("timeseriesSubtitle").textContent = `${start || "—"} → ${end || "—"} · 同日 hover 与 X 轴缩放在所有坐标间同步。`;
+    $("timeseriesSubtitle").textContent = `${start || "—"} → ${end || "—"} · hover 任一坐标会同时读出该日期在全部坐标上的数值，X 轴缩放同步。`;
     $("addChartButton").disabled = indicatorState.chartCount >= MAX_CHARTS;
     renderIndicatorWarnings(active);
   }
@@ -741,7 +942,7 @@
       const removeButton = indicatorState.chartCount > 1
         ? `<button class="remove-chart-button" type="button" data-chart-remove="${lane}">删除坐标</button>` : "";
       return `<article class="panel chart-panel timeseries-panel" data-chart-lane="${lane}">
-        <div class="panel-heading"><div><p class="eyebrow">CHART ${lane}</p><h3>坐标 ${lane}</h3></div><div class="chart-pane-actions"><span id="chartPaneCount-${lane}" class="chart-pane-count">0 active</span><span class="axis-note">左轴：波动率 % · 右轴：价格 · 框选缩放</span>${removeButton}</div></div>
+        <div class="panel-heading"><div><p class="eyebrow">CHART ${lane}</p><h3>坐标 ${lane}</h3></div><div class="chart-pane-actions"><span id="chartPaneCount-${lane}" class="chart-pane-count">0 active</span><span class="axis-note">左轴：波动率 % · 右轴：价格与比值 · 框选缩放</span>${removeButton}</div></div>
         <div id="indicatorChart-${lane}" class="chart timeseries-chart"></div>
       </article>`;
     }).join("");
@@ -750,9 +951,51 @@
   function bindChartSync(div) {
     if (!div?.on || div.dataset.syncBound === "true") return;
     div.dataset.syncBound = "true";
-    div.on("plotly_hover", (event) => syncHover(div, event.points?.[0]?.x));
+    div.on("plotly_hover", (event) => {
+      const xValue = event.points?.[0]?.x;
+      syncHover(div, xValue);
+      renderCrosshairReadout(hoverDateKey(xValue));
+    });
     div.on("plotly_unhover", () => clearSynchronizedHover(div));
     div.on("plotly_relayout", (event) => syncXZoom(div, event));
+  }
+
+  function hoverDateKey(xValue) {
+    return xValue === undefined || xValue === null ? null : String(xValue).slice(0, 10);
+  }
+
+  // Hovering one lane has to answer "what did every other lane do on this same day",
+  // so the readout lists every active indicator across all lanes for the hovered date.
+  function renderCrosshairReadout(date) {
+    const box = $("crosshairReadout");
+    if (!box) return;
+    indicatorState.hoverDate = date;
+    const active = indicatorState.items.filter((item) => item.active);
+    if (!date || !active.length) {
+      box.classList.add("is-hidden");
+      box.innerHTML = "";
+      return;
+    }
+    const lanes = [];
+    for (let lane = 1; lane <= indicatorState.chartCount; lane += 1) {
+      const rows = active
+        .filter((item) => Number(item.config.chartLane) === lane)
+        .map((item) => {
+          const entry = indicatorState.seriesIndex.get(item.id);
+          const value = entry?.byDate?.get(date);
+          const text = value === undefined || value === null ? "—" : `${formatNumber(value, 4)}${unitSuffix(item)}`;
+          const missing = value === undefined || value === null ? " is-missing" : "";
+          return `<li><i style="background:${itemColor(item)}"></i><span>${escapeHtml(indicatorLabel(item))}</span><strong class="readout-value${missing}">${escapeHtml(text)}</strong></li>`;
+        });
+      if (rows.length) lanes.push(`<div class="readout-lane"><small>坐标 ${lane}</small><ul>${rows.join("")}</ul></div>`);
+    }
+    if (!lanes.length) {
+      box.classList.add("is-hidden");
+      box.innerHTML = "";
+      return;
+    }
+    box.classList.remove("is-hidden");
+    box.innerHTML = `<div class="readout-date"><small>HOVER DATE</small><strong>${escapeHtml(date)}</strong></div><div class="readout-lanes">${lanes.join("")}</div>`;
   }
 
   function chartDivs() {
@@ -944,19 +1187,72 @@
   }
 
   function indicatorTrace(item) {
-    const series = item.response.series;
-    const valueKey = { implied_vol: "impliedVol", realized_vol: "realizedVol", spot: "spot", forward: "forward" }[item.type];
+    const points = indicatorState.seriesIndex.get(item.id).points;
+    const flagsByDate = new Map((item.response?.series || []).map((point) => [point.date, point.qualityFlags.join(", ")]));
     return {
       type: "scatter",
       mode: "lines",
-      x: series.map((point) => point.date),
-      y: series.map((point) => point[valueKey]),
+      x: points.map((point) => point.date),
+      y: points.map((point) => point.value),
       name: indicatorLabel(item),
-      text: series.map((point) => point.qualityFlags.join(", ")),
+      text: points.map((point) => flagsByDate.get(point.date) || (item.type === "derived" ? "derived" : "")),
       hovertemplate: "%{x}<br>%{y:.4f}<br>%{text}<extra>%{fullData.name}</extra>",
-      line: { color: PALETTE[(item.id - 1) % PALETTE.length], width: 2 },
-      yaxis: ["spot", "forward"].includes(item.type) ? "y2" : "y",
+      line: { color: itemColor(item), width: 2, dash: item.type === "derived" ? "dot" : "solid" },
+      // Only volatility points share the left axis; prices, ratios and mixed-unit
+      // results go right so a ratio around 1 cannot flatten the vol scale.
+      yaxis: indicatorUnit(item) === "vol" ? "y" : "y2",
       connectgaps: false,
+    };
+  }
+
+  function renderIndicatorStats() {
+    const body = $("indicatorStatsBody");
+    if (!body) return;
+    const headers = ["Indicator", "坐标", "观测数", "最新值", "最新日期", "最小", "最大", "平均", "中位数", "标准差", "最新值百分位"];
+    $("indicatorStatsHead").innerHTML = `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
+    const active = indicatorState.items.filter((item) => item.active);
+    const rows = active.map((item) => {
+      const entry = indicatorState.seriesIndex.get(item.id);
+      const stats = summarizeSeries(entry?.points);
+      const head = `<td>${escapeHtml(indicatorLabel(item))}</td><td>${escapeHtml(item.config.chartLane)}</td>`;
+      if (!stats) {
+        return `<tr>${head}<td colspan="9" class="cell-missing">${escapeHtml(entry?.error || "当前范围内没有有效值")}</td></tr>`;
+      }
+      const suffix = unitSuffix(item);
+      const cell = (value, digits = 3) => `<td>${escapeHtml(`${formatNumber(value, digits)}${suffix}`)}</td>`;
+      return `<tr>${head}<td>${formatNumber(stats.count, 0)}</td>${cell(stats.latest)}<td>${escapeHtml(stats.latestDate)}</td>
+        ${cell(stats.min)}${cell(stats.max)}${cell(stats.mean)}${cell(stats.median)}${cell(stats.stdDev)}
+        <td>${escapeHtml(`${formatNumber(stats.percentile, 1)}%`)}</td></tr>`;
+    });
+    body.innerHTML = rows.join("") || `<tr><td colspan="${headers.length}" class="cell-missing">没有启用中的 indicator。</td></tr>`;
+    $("indicatorStatsCount").textContent = `${active.length} series`;
+  }
+
+  function summarizeSeries(points) {
+    if (!points) return null;
+    const usable = points
+      .filter((point) => point.value !== null && point.value !== undefined)
+      .sort((left, right) => (left.date < right.date ? -1 : left.date > right.date ? 1 : 0));
+    if (!usable.length) return null;
+    const values = usable.map((point) => point.value);
+    const sorted = [...values].sort((left, right) => left - right);
+    const count = values.length;
+    const mean = values.reduce((sum, value) => sum + value, 0) / count;
+    const variance = count > 1
+      ? values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (count - 1)
+      : 0;
+    const latest = usable.at(-1);
+    const middle = Math.floor(count / 2);
+    return {
+      count,
+      min: sorted[0],
+      max: sorted.at(-1),
+      mean,
+      median: count % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
+      stdDev: Math.sqrt(variance),
+      latest: latest.value,
+      latestDate: latest.date,
+      percentile: (sorted.filter((value) => value <= latest.value).length / count) * 100,
     };
   }
 
