@@ -1,0 +1,53 @@
+[
+ {
+  "code": "US_QQQ",
+  "type": "tracker",
+  "bbgCode": "QQQ",
+  "isin": "XX0000000000",
+  "ric": "QQQ.OQ",
+  "sedol": "FICT000",
+  "countryCode": "US",
+  "currencyCode": "USD",
+  "region": "AMER",
+  "marketPlaceCode": "NYK",
+  "marketName": "XNMS",
+  "companyName": "Invesco QQQ Trust Series 1",
+  "status": "ACTV",
+  "intraday": true,
+  "volVarSwap": false
+ },
+ {
+  "code": "US_QQQE",
+  "type": "tracker",
+  "bbgCode": "QQQE",
+  "isin": "XX0000000001",
+  "ric": "QQQE.OQ",
+  "sedol": "FICT001",
+  "countryCode": "US",
+  "currencyCode": "USD",
+  "region": "AMER",
+  "marketPlaceCode": "NYK",
+  "marketName": "XNMS",
+  "companyName": "Direxion NASDAQ100 Equal Weig",
+  "status": "ACTV",
+  "intraday": false,
+  "volVarSwap": false
+ },
+ {
+  "code": "US_QQQM",
+  "type": "tracker",
+  "bbgCode": "QQQM",
+  "isin": "XX0000000002",
+  "ric": "QQQM.OQ",
+  "sedol": "FICT002",
+  "countryCode": "US",
+  "currencyCode": "USD",
+  "region": "AMER",
+  "marketPlaceCode": "NYK",
+  "marketName": "XNMS",
+  "companyName": "Invesco Nasdaq 100 ETF",
+  "status": "ACTV",
+  "intraday": false,
+  "volVarSwap": false
+ }
+]
