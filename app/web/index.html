@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/static/styles.css" />
     <script defer src="/static/vendor/plotly-5.24.1.min.js"></script>
     <script defer src="/static/app.js"></script>
+    <script defer src="/static/compare-builder.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -26,26 +27,26 @@
       <aside class="query-rail" aria-label="查询条件">
         <div class="rail-heading">
           <p class="eyebrow">QUERY BUILDER</p>
-          <h1>构建波动率查询</h1>
-          <p>坐标选项来自后端 capability registry。</p>
+          <h1>构建时序指标</h1>
+          <p>先确定标的与时间，再逐个添加、启用或删除指标。</p>
         </div>
 
         <form id="queryForm" novalidate>
           <fieldset class="segmented" aria-label="查询类型">
-            <label><input type="radio" name="queryKind" value="compare" checked /><span>IV / RV 比较</span></label>
+            <label><input type="radio" name="queryKind" value="compare" checked /><span>Time series</span></label>
             <label><input type="radio" name="queryKind" value="surface" /><span>Surface</span></label>
           </fieldset>
 
           <section class="form-section">
             <h2>标的与日期</h2>
             <label class="field field-wide">
-              <span>BNP instrument code</span>
+              <span>Default BNP instrument code</span>
               <div class="input-action">
                 <input id="instrumentCode" name="instrumentCode" value="US_QQQ" list="instrumentOptions" autocomplete="off" />
                 <button id="instrumentSearchButton" class="icon-button" type="button" title="搜索标的">⌕</button>
               </div>
               <datalist id="instrumentOptions"></datalist>
-              <small id="instrumentHelp">输入代码或关键词后搜索；当前 catalogue 仅 equity。</small>
+              <small id="instrumentHelp">作为新 indicator 的默认标的；已保存 indicator 保留自己的标的。当前 catalogue 仅 equity。</small>
             </label>
             <div class="field-grid two">
               <label class="field"><span>开始日期</span><input id="startDate" type="date" required /></label>
@@ -53,6 +54,27 @@
             </div>
           </section>
 
+          <section id="indicatorBuilder" class="form-section indicator-builder">
+            <div class="section-heading-row"><h2>Indicator builder</h2><span id="indicatorCount" class="mini-badge">0</span></div>
+            <label class="field field-wide">
+              <span>Indicator</span>
+              <select id="indicatorType">
+                <option value="implied_vol">Implied volatility</option>
+                <option value="realized_vol">Realized volatility</option>
+                <option value="spot">Spot · 原始未复权</option>
+                <option value="forward">Forward</option>
+              </select>
+            </label>
+            <div id="indicatorConfig"></div>
+            <p id="indicatorBuilderNote" class="inline-note"></p>
+            <div id="indicatorFormError" class="form-error is-hidden" role="alert"></div>
+            <button id="addIndicatorButton" class="primary-button" type="button"><span>添加并加载指标</span><strong>＋</strong></button>
+            <div class="saved-indicator-heading"><h2>Saved indicators</h2><button id="refreshIndicatorsButton" class="text-button" type="button">刷新激活项</button></div>
+            <div id="savedIndicators" class="saved-indicators"><p class="empty-list-copy">尚未添加指标。</p></div>
+            <p class="saved-indicator-storage-note">配置与启用状态保存在当前浏览器（换浏览器或清除站点数据后不共享）；行情响应不保存，重新打开后会重新请求。</p>
+          </section>
+
+          <div id="surfaceQueryBuilder" class="is-hidden">
           <section class="form-section">
             <h2>IV 坐标</h2>
             <label class="field field-wide"><span>请求模式</span><select id="requestMode"></select></label>
@@ -87,6 +109,7 @@
 
           <div id="formError" class="form-error is-hidden" role="alert"></div>
           <button id="runButton" class="primary-button" type="submit"><span>运行查询</span><kbd>↵</kbd></button>
+          </div>
         </form>
 
         <details class="builder-disclosures">
@@ -96,6 +119,20 @@
       </aside>
 
       <main class="workspace">
+        <section id="compareWorkspace" class="compare-workspace">
+          <div class="timeseries-heading">
+            <div><p class="eyebrow">TIME SERIES WORKSPACE</p><h2 id="timeseriesTitle">空白时序图</h2><p id="timeseriesSubtitle">添加 indicator 后，激活的序列会显示在同一时间轴上。</p></div>
+            <div class="timeseries-actions"><span id="timeseriesStatus" class="outline-badge">0 active</span><button id="addChartButton" class="secondary-button" type="button">＋ 添加坐标</button></div>
+          </div>
+          <div id="timeseriesWarning" class="warning-banner is-hidden"></div>
+          <div id="indicatorCharts" class="indicator-chart-stack"></div>
+          <section class="panel compare-guidance">
+            <div><strong>精确请求</strong><p>错误或缺失坐标保持为空，不取整、不插值、不替换成最近值。</p></div>
+            <div><strong>BNP 请求字段</strong><p>Vol convention 与 layout 保持可见、可选，并保存到每个 indicator。</p></div>
+            <div><strong>最多 5 个坐标</strong><p>上下排列；indicator 可使用不同标的，并可移动到任一坐标。</p></div>
+          </section>
+        </section>
+
         <section id="welcomeState" class="welcome-state">
           <div class="welcome-grid">
             <article class="welcome-copy">
@@ -123,6 +160,7 @@
           <div class="result-heading">
             <div><p id="resultEyebrow" class="eyebrow">COMPARE RESULT</p><h2 id="resultTitle">—</h2><p id="resultSubtitle">—</p></div>
             <div class="result-actions">
+              <label id="detailIndicatorField" class="detail-indicator-field is-hidden"><span>当前指标详情</span><select id="detailIndicatorSelect"></select></label>
               <span id="cacheBadge" class="outline-badge">—</span>
               <button id="csvButton" class="secondary-button" type="button">下载 CSV</button>
             </div>

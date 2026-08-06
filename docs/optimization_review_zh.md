@@ -7,7 +7,7 @@
 
 原计划对优先级的判断基本正确：在继续做页面前，必须先解决非正 IV、重复日期、forward RV 范围、cache 完成顺序和公司行动误标。此次优化没有改写用户提供的计划原文，而是先完成可离线验证的正确性加固，再以 Gate B/C 的 fixture 与 live 证据逐项开放能力。
 
-Phase A、B、C、D、E 已分别收口。delta、fixed、listed 已具备严格请求契约、BNP wire serializer、通用坐标 parser、REST/CSV 路由、fixtures、真实 API probe 与动态 Web 页面。Phase E 已完成独立数值复算、安全/依赖审计、raw hash、single-worker runtime 和运维文档。用户明确指出 Compare/Surface 入口不直观，并对信息密度保留意见；这些项目现在进入 Phase E 后的 UI revisit。
+Phase A、B、C、D、E 已分别收口。delta、fixed、listed 已具备严格请求契约、BNP wire serializer、通用坐标 parser、REST/CSV 路由、fixtures、真实 API probe 与动态 Web 页面。Phase E 已完成独立数值复算、安全/依赖审计、raw hash、single-worker runtime 和运维文档。Phase F1 正在把 Compare 改造成“全局标的/日期 + 可组合 indicator + 单一时间轴”；Surface 和结果信息密度留在后续批次。
 
 ## 已核实的基线
 
@@ -77,10 +77,11 @@ Phase A、B、C、D、E 已分别收口。delta、fixed、listed 已具备严格
 
 ## 下一实施批次
 
-1. 重新设计 Compare/Surface 入口，拆解 maturity/strike 两个字段维度，并 revisit 信息密度。
-2. 最近坐标只允许作为实际返回轴的参考提示；任何 UI 修订都不得改变“不替代精确请求”的语义。
-3. Listed 坐标发现继续使用单日、无边界的 BNP `fixed maturity + fixed strike` Surface；expiry 和 strike 均不自动选择，只有用户点击应用才写入查询。
-4. 在实际部署主机执行 Docker build、容器 health 与持久卷复验。
+1. Phase F1：验收 Compare 的最多 5 个上下同步坐标、每 indicator 独立标的/坐标、同日 hover、矩形 zoom、持久化/启停/删除、maturity/strike 分步选择，以及逐 indicator 数据表、方法、质量、activity、disclosures 和 CSV。
+2. Phase F2：在 F1 通过后再根据实际使用反馈调整结果区信息密度与层级；跨页面重开保存已按用户决定在 F1 完成。
+3. 最近坐标只允许作为实际返回轴的参考提示；任何 UI 修订都不得改变“不替代精确请求”的语义。
+4. Listed 坐标发现继续使用单日、无边界的 BNP `fixed maturity + fixed strike` Surface；expiry 和 strike 均不自动选择，只有用户点击应用才写入草稿。
+5. 在实际部署主机执行 Docker build、容器 health 与持久卷复验。
 
 ## 当前验证
 

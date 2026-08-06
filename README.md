@@ -110,6 +110,7 @@ raw 响应 gzip 压缩,以请求哈希命名;normalized 落 parquet。
 - ✅ Phase C / Phase 4 — FastAPI instruments、compare、surface、CSV、统一 errors、activity events 与 live API probes 全部通过（Gate C PASS）
 - ✅ Phase D / Phase 5 — 动态 Web、Compare/Surface、listed 合约坐标发现、smile/term structure、表格/CSV、methodology、quality/activity/disclosures（技术 Gate 通过，UX 待修订）
 - ✅ Phase E / Phase 6–7 — 独立数值核对、完整 secret/dependency scan、single-worker 部署与运维说明（Gate E PASS；Docker build 待部署主机复验）
+- 🚧 Phase F1 — Compare 支持最多 5 个上下同步坐标、每 indicator 独立标的、同日 hover、矩形 zoom 与跨页面重开恢复；逐 indicator 数据、方法、质量、activity、disclosures 与 CSV 已接回；等待用户 UI 验收
 
 代码级审阅、原计划修订意见和 Gate 状态见
 [`docs/optimization_review_zh.md`](docs/optimization_review_zh.md)。
@@ -125,6 +126,8 @@ Phase E 的逐项结果与环境边界见
 [`docs/validation_report.md`](docs/validation_report.md)，部署步骤见
 [`docs/operations_runbook_zh.md`](docs/operations_runbook_zh.md)，licensed raw data 边界见
 [`docs/data_retention_policy_zh.md`](docs/data_retention_policy_zh.md)。
+Compare indicator builder 的产品语义、BNP 字段解释和用户检查项见
+[`docs/phase_f_compare_indicator_builder_zh.md`](docs/phase_f_compare_indicator_builder_zh.md)。
 
 ## Phase E 最终交付（已完成）
 

@@ -149,6 +149,7 @@ async function loadCapabilities() {
     renderCoordinateFields();
     renderIndicatorSelector();
     renderBuilderDisclosures();
+    window.dispatchEvent(new CustomEvent("volcurve:capabilities"));
   } catch (error) {
     showError(error, "无法载入 capability registry");
   }
@@ -466,6 +467,7 @@ function validateRequest(request) {
 
 async function runQuery(event) {
   event.preventDefault();
+  if (state.queryKind === "compare") return;
   $("formError").classList.add("is-hidden");
   let volatilityRequest;
   try {
@@ -844,6 +846,10 @@ async function searchInstruments() {
 }
 
 async function downloadCsv() {
+  if (state.queryKind === "compare" && window.volcurveCompareDetails?.downloadSelectedCsv) {
+    await window.volcurveCompareDetails.downloadSelectedCsv();
+    return;
+  }
   if (!state.lastResponse || !state.lastRequest) return;
   if (state.queryKind === "compare") {
     try {
