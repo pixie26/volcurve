@@ -113,6 +113,19 @@ Phase C 的 REST API、fixture/live Gate 与用户检查项见
 Phase D 的 Web 功能、浏览器验收证据与用户检查项见
 [`docs/phase_d_acceptance_zh.md`](docs/phase_d_acceptance_zh.md)。
 
+## Phase E 最终交付
+
+Phase D 经用户确认后进入最后一个阶段 Phase E。该阶段除代码和验证外，也会同步更新本 README，最终至少覆盖：
+
+- 独立 IV/RV 与 fixed/delta/listed 抽样核对结果；
+- Web 页面、REST API 与 CSV 的一致性验证入口；
+- secret scan、dependency audit 与 raw hash 验证命令；
+- Docker、single-worker 内网部署方式和健康检查；
+- licensed raw data 保留边界、故障处理及日常运维入口；
+- 最终 `validation_report.md` 与 operations runbook 链接。
+
+在 Phase E Gate 通过前，上述内容属于待交付项，不应将当前版本视为已完成生产部署验收。
+
 ## 安全
 
 - 凭证、token、Authorization 头不落盘、不进日志、不回显
