@@ -69,6 +69,11 @@ python -m pytest -q
 `vol/compare`、`vol/surface`、`vol/compare.csv` 与 health；页面只展示 capability registry 中
 `enabled=true` 的请求模式。
 
+在 `Fixed/Listed · 绝对 strike` 模式中，可按 instrument 和 observation date 点击“加载可用坐标”。
+页面通过单日、无 strike/expiry 边界的 `fixed maturity + fixed strike` Surface 请求读取 BNP 当天
+实际返回的 listed expiries；选择 expiry 后，只把该 expiry 下 effective IV 有效的 strikes 放入下拉。
+无效坐标数量和 flags 仍会显示，任何 expiry/strike 都必须由用户明确选择并应用，不做最近值替代。
+
 ## Gate 探针(逐阶段验收)
 
 | 脚本 | 阶段 | 作用 |
@@ -78,6 +83,10 @@ python -m pytest -q
 | `scripts/qqq_probe.py` | Phase 1 | IV 探针,确定 matrix 方向与 IV 单位,产出 `qqq_probe.csv` |
 | `scripts/make_fixtures.py` | Phase 1 | 由 live 响应生成脱敏 fixture |
 | `scripts/cache_probe.py` | Gate 2 | 同请求跑两次(live→cache),验证标准化结果一致 |
+| `scripts/validate_rv.py` | Phase E | live 10 日期 IV 核对与独立 RV 复算 |
+| `scripts/phase_c_api_probe.py` | Phase E | live fixed/delta/listed 与 API/CSV 一致性 |
+| `scripts/audit_raw_hashes.py` | Phase E | 对所有 COMPLETED raw payload 重算 hash |
+| `scripts/secret_scan.py` | Phase E | 扫描候选文件、完整可达 Git 历史及当前配置值 |
 
 ## 计算口径(确认)
 
@@ -90,7 +99,7 @@ python -m pytest -q
 `data/raw/` 为权威源;`data/normalized/` 与 `data/catalog.duckdb` 可从 raw 重建。
 raw 响应 gzip 压缩,以请求哈希命名;normalized 落 parquet。
 
-## 当前状态（2026-08-06 优化后）
+## 当前状态（2026-08-07 优化后）
 
 - ✅ Phase 0 — 项目骨架、离线文档、认证管理、Gate 0
 - ✅ Phase 1 — instrument + QQQ IV 探针,方向/单位确认
@@ -99,8 +108,8 @@ raw 响应 gzip 压缩,以请求哈希命名;normalized 落 parquet。
 - ✅ Phase A 正确性加固 — invalid IV、duplicate、完整 cache 状态、forward 自动追加、质量响应契约、UTC、latest comparable、return-outlier 语义（Gate A PASS）
 - ✅ Phase B — request models、独立 serializer、多模式 parser、fixtures、disclosures 与七组真实 API probes 全部通过（Gate B PASS）
 - ✅ Phase C / Phase 4 — FastAPI instruments、compare、surface、CSV、统一 errors、activity events 与 live API probes 全部通过（Gate C PASS）
-- ✅ Phase D / Phase 5 — 动态 Web、Compare/Surface、smile/term structure、表格/CSV、methodology、quality/activity/disclosures（Gate D PASS，等待用户检查）
-- ⬜ Phase E / Phase 6–7 — 独立数值核对、完整 secret/dependency scan、部署与运维说明
+- ✅ Phase D / Phase 5 — 动态 Web、Compare/Surface、listed 合约坐标发现、smile/term structure、表格/CSV、methodology、quality/activity/disclosures（技术 Gate 通过，UX 待修订）
+- ✅ Phase E / Phase 6–7 — 独立数值核对、完整 secret/dependency scan、single-worker 部署与运维说明（Gate E PASS；Docker build 待部署主机复验）
 
 代码级审阅、原计划修订意见和 Gate 状态见
 [`docs/optimization_review_zh.md`](docs/optimization_review_zh.md)。
@@ -112,19 +121,23 @@ Phase C 的 REST API、fixture/live Gate 与用户检查项见
 [`docs/phase_c_acceptance_zh.md`](docs/phase_c_acceptance_zh.md)。
 Phase D 的 Web 功能、浏览器验收证据与用户检查项见
 [`docs/phase_d_acceptance_zh.md`](docs/phase_d_acceptance_zh.md)。
+Phase E 的逐项结果与环境边界见
+[`docs/validation_report.md`](docs/validation_report.md)，部署步骤见
+[`docs/operations_runbook_zh.md`](docs/operations_runbook_zh.md)，licensed raw data 边界见
+[`docs/data_retention_policy_zh.md`](docs/data_retention_policy_zh.md)。
 
-## Phase E 最终交付
+## Phase E 最终交付（已完成）
 
-Phase D 经用户确认后进入最后一个阶段 Phase E。该阶段除代码和验证外，也会同步更新本 README，最终至少覆盖：
+用户已允许 Phase D 的 UX 修订不阻塞最后一个阶段 Phase E。本阶段已交付：
 
 - 独立 IV/RV 与 fixed/delta/listed 抽样核对结果；
 - Web 页面、REST API 与 CSV 的一致性验证入口；
 - secret scan、dependency audit 与 raw hash 验证命令；
 - Docker、single-worker 内网部署方式和健康检查；
 - licensed raw data 保留边界、故障处理及日常运维入口；
-- 最终 `validation_report.md` 与 operations runbook 链接。
+- 最终 validation report、operations runbook 与 raw retention policy。
 
-在 Phase E Gate 通过前，上述内容属于待交付项，不应将当前版本视为已完成生产部署验收。
+Gate E 已通过。当前主机没有 Docker CLI，因此 Dockerfile 通过静态契约、隔离 production install、wheel build 与真实 Uvicorn smoke 验证；实际 image build 和持久卷 health 仍须在部署主机完成，详见 validation report。
 
 ## 安全
 

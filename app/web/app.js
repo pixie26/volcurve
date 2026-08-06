@@ -5,6 +5,7 @@ const state = {
   queryKind: "compare",
   lastRequest: null,
   lastResponse: null,
+  contractDiscovery: null,
 };
 
 const MODE_LABELS = {
@@ -107,9 +108,14 @@ async function initialize() {
 
 function bindEvents() {
   $("queryForm").addEventListener("submit", runQuery);
-  $("requestMode").addEventListener("change", renderCoordinateFields);
+  $("requestMode").addEventListener("change", () => {
+    state.contractDiscovery = null;
+    renderCoordinateFields();
+  });
   $("maturityRule").addEventListener("change", renderCoordinateFields);
   $("strikeRule").addEventListener("change", renderCoordinateFields);
+  $("instrumentCode").addEventListener("input", resetContractDiscovery);
+  $("endDate").addEventListener("change", resetContractDiscovery);
   $("instrumentSearchButton").addEventListener("click", searchInstruments);
   $("snapshotDate").addEventListener("change", renderSurfaceSnapshot);
   $("csvButton").addEventListener("click", downloadCsv);
@@ -203,7 +209,7 @@ function renderCoordinateFields() {
       ${compare ? "" : numberField("High strike", "highFixedStrike", "120", "0.000001")}
       ${dateField(compare ? "Expiry" : "Low expiry", "lowFixedMaturity", expiry)}
       ${compare ? "" : dateField("High expiry", "highFixedMaturity", highExpiry)}
-    </div>`;
+    </div>${contractDiscoveryPanel()}`;
   } else {
     const expiry = addCalendar($("endDate").value || isoDate(new Date()), { months: 3 });
     const highExpiry = addCalendar(expiry, { months: 3 });
@@ -215,9 +221,139 @@ function renderCoordinateFields() {
     </div>`;
   }
   $("coordinateFields").innerHTML = html;
+  bindContractDiscoveryEvents();
   $("coordinateModeNote").textContent = compare
     ? "Compare 只请求一个精确坐标。缺失时保持缺失，不会自动换成邻近 strike 或 expiry。"
     : "Surface 保留所选范围内全部返回坐标，不会自动降维；图表只渲染当前日期切片。";
+}
+
+function resetContractDiscovery() {
+  if (!state.contractDiscovery) return;
+  state.contractDiscovery = null;
+  if ($("requestMode").value === "fixed_strike") renderCoordinateFields();
+}
+
+function contractDiscoveryPanel() {
+  const discovery = state.contractDiscovery;
+  const observationDate = discovery?.date || $("endDate").value || isoDate(new Date());
+  let result = "";
+  if (discovery?.status === "loading") {
+    result = '<p class="coordinate-discovery-status">正在向 BNP 请求该观察日的 listed surface…</p>';
+  } else if (discovery?.status === "error") {
+    result = `<p class="coordinate-discovery-error">${escapeHtml(discovery.message)}</p>`;
+  } else if (discovery?.status === "ready") {
+    const expiryOptions = discovery.snapshot.maturities
+      .map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
+      .join("");
+    result = `<div class="coordinate-grid discovery-selectors">
+      <label class="field"><span>Available expiry</span><select id="availableExpiry"><option value="">请选择实际返回 expiry</option>${expiryOptions}</select></label>
+      <label class="field"><span>Available strike</span><select id="availableStrike" disabled><option value="">先选择 expiry</option></select></label>
+    </div>
+    <p id="contractCoordinateStatus" class="coordinate-discovery-status">已返回 ${discovery.snapshot.maturities.length} 个 expiry；请选择一个 expiry 查看具有有效 IV 的 strikes。</p>
+    <button id="applyContractCoordinate" class="secondary-button discovery-apply" type="button" disabled>应用所选坐标</button>`;
+  }
+  return `<section class="coordinate-discovery" aria-label="可用 listed 合约坐标">
+    <div class="coordinate-discovery-heading"><div><strong>可用合约坐标</strong><small>按观察日读取实际 listed expiry/strike；BNP 将此组合命名为 fixed maturity + fixed strike。不会替代当前输入。</small></div></div>
+    <div class="field-grid discovery-loader">
+      <label class="field"><span>Observation date</span><input id="contractObservationDate" type="date" value="${escapeHtml(observationDate)}" /></label>
+      <button id="loadContractCoordinates" class="secondary-button" type="button" ${discovery?.status === "loading" ? "disabled" : ""}>加载可用坐标</button>
+    </div>${result}
+  </section>`;
+}
+
+function bindContractDiscoveryEvents() {
+  const loadButton = $("loadContractCoordinates");
+  if (!loadButton) return;
+  loadButton.addEventListener("click", loadListedCoordinates);
+  const expirySelect = $("availableExpiry");
+  if (expirySelect) expirySelect.addEventListener("change", renderAvailableStrikes);
+  const strikeSelect = $("availableStrike");
+  if (strikeSelect) strikeSelect.addEventListener("change", updateContractApplyState);
+  const applyButton = $("applyContractCoordinate");
+  if (applyButton) applyButton.addEventListener("click", applyContractCoordinate);
+}
+
+async function loadListedCoordinates() {
+  const code = $("instrumentCode").value.trim();
+  const date = $("contractObservationDate").value;
+  if (!code || !date) {
+    $("formError").textContent = "加载可用坐标前，请输入 instrument code 和 observation date。";
+    $("formError").classList.remove("is-hidden");
+    return;
+  }
+  $("formError").classList.add("is-hidden");
+  state.contractDiscovery = { status: "loading", code, date };
+  renderCoordinateFields();
+  try {
+    const response = await apiFetch(state.capabilities.endpoints.surface, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        volatilityRequest: {
+          code,
+          code_type: "bnpp",
+          volatility_convention: $("volConvention").value,
+          start_date: date,
+          end_date: date,
+          maturity_rule: "fixed",
+          strike_rule: "fixed",
+          layout: "matrix",
+        },
+      }),
+    });
+    const payload = await response.json();
+    const snapshot = payload.snapshots.find((item) => item.date === date);
+    if (!snapshot) throw new Error("BNP 在该观察日没有返回 listed surface。请改用另一个可用市场日期。");
+    state.contractDiscovery = { status: "ready", code, date, snapshot, requestId: payload.requestId };
+  } catch (error) {
+    state.contractDiscovery = {
+      status: "error",
+      code,
+      date,
+      message: error.payload?.message || error.message || "可用坐标加载失败。",
+    };
+  }
+  renderCoordinateFields();
+}
+
+function renderAvailableStrikes() {
+  const expiry = $("availableExpiry").value;
+  const strikeSelect = $("availableStrike");
+  const status = $("contractCoordinateStatus");
+  const applyButton = $("applyContractCoordinate");
+  applyButton.disabled = true;
+  if (!expiry) {
+    strikeSelect.disabled = true;
+    strikeSelect.innerHTML = '<option value="">先选择 expiry</option>';
+    status.textContent = "请选择一个实际返回 expiry；系统不会自动选取最近日期。";
+    return;
+  }
+  const points = state.contractDiscovery.snapshot.points.filter((point) => point.maturity === expiry);
+  const valid = points.filter((point) => point.impliedVol !== null);
+  const invalid = points.filter((point) => point.impliedVol === null);
+  const uniqueValid = [...new Map(valid.map((point) => [point.strike, point])).values()];
+  strikeSelect.innerHTML = `<option value="">请选择有效 strike</option>${uniqueValid
+    .map((point) => `<option value="${escapeHtml(point.strike)}">${escapeHtml(point.strike)} · IV ${formatPercent(point.impliedVol)}</option>`)
+    .join("")}`;
+  strikeSelect.disabled = uniqueValid.length === 0;
+  const invalidFlags = [...new Set(invalid.flatMap((point) => point.qualityFlags).filter((flag) => flag !== "OK"))];
+  status.textContent = `${expiry}：${uniqueValid.length} 个 strike 有有效 IV；${invalid.length} 个无效坐标保留质量状态但不进入下拉${invalidFlags.length ? `（${invalidFlags.join(", ")}）` : ""}。系统未自动选择 strike。`;
+}
+
+function updateContractApplyState() {
+  $("applyContractCoordinate").disabled = !$("availableExpiry").value || !$("availableStrike").value;
+}
+
+function applyContractCoordinate() {
+  const expiry = $("availableExpiry").value;
+  const strike = $("availableStrike").value;
+  if (!expiry || !strike) return;
+  $("maturityRule").value = "fixed";
+  $("lowFixedMaturity").value = expiry;
+  $("lowFixedStrike").value = strike;
+  if ($("highFixedMaturity")) $("highFixedMaturity").value = expiry;
+  if ($("highFixedStrike")) $("highFixedStrike").value = strike;
+  $("contractCoordinateStatus").textContent = `已明确应用 listed expiry ${expiry} / strike ${strike}（BNP fixed+fixed wire mode）。这是用户选择，不是最近坐标替代。`;
 }
 
 function coordinateSelects(labelOne, keyOne, valuesOne, defaultOne, labelTwo, keyTwo, valuesTwo, defaultTwo, compare) {

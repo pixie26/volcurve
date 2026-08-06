@@ -7,7 +7,7 @@
 
 原计划对优先级的判断基本正确：在继续做页面前，必须先解决非正 IV、重复日期、forward RV 范围、cache 完成顺序和公司行动误标。此次优化没有改写用户提供的计划原文，而是先完成可离线验证的正确性加固，再以 Gate B/C 的 fixture 与 live 证据逐项开放能力。
 
-Phase A、B、C、D 已分别按 Gate A、B、C、D 收口。delta、fixed、listed 已具备严格请求契约、BNP wire serializer、通用坐标 parser、REST/CSV 路由、fixtures、真实 API probe 与动态 Web 页面；Phase D 正等待用户检查。
+Phase A、B、C、D、E 已分别收口。delta、fixed、listed 已具备严格请求契约、BNP wire serializer、通用坐标 parser、REST/CSV 路由、fixtures、真实 API probe 与动态 Web 页面。Phase E 已完成独立数值复算、安全/依赖审计、raw hash、single-worker runtime 和运维文档。用户明确指出 Compare/Surface 入口不直观，并对信息密度保留意见；这些项目现在进入 Phase E 后的 UI revisit。
 
 ## 已核实的基线
 
@@ -72,20 +72,21 @@ Phase A、B、C、D 已分别按 Gate A、B、C、D 收口。delta、fixed、lis
 | Phase A：前端异常契约 | 通过 | response schema 含 raw/effective、flags、quality summary、warning 与 activity；路由属于 Phase C |
 | Phase B：完整请求模式 | 通过 | 模型、serializer、parser、fixtures、disclosures 与七组 live probe 均通过 |
 | Phase C：REST API | 通过 | 全接口、统一 errors/activity、fixture integration、live delta/fixed/listed 与 CSV 一致性均通过 |
-| Phase D：Web MVP | 通过，待用户检查 | 四种动态模式、Compare/Surface、离线图表、表格/CSV、methodology、quality/activity/disclosures 与桌面/移动浏览器检查均通过 |
-| Phase E：验证部署 | 未开始 | 定向 secret 检查不能替代完整 Gate |
+| Phase D：Web MVP | 技术 Gate 通过，UX 待修订 | CSV 位置通过；absolute-strike 模式已增加按观察日发现实际 listed expiry/有效 strike；Compare/Surface 入口、字段结构和信息密度待 Phase E 后 revisit |
+| Phase E：验证部署 | 通过 | 10 日期 IV、独立 RV、live 核心模式、API/CSV、raw hash、secret/dependency audit、private repo、single-worker 与文档均通过；Docker build 待部署主机复验 |
 
 ## 下一实施批次
 
-1. 等待用户检查并批准 Phase D 的使用方式与页面信息密度。
-2. Phase E 做独立数值复算、live page/API/CSV 一致性、完整 secret/dependency scan、Docker 与运维说明。
-3. 用户在实际使用 Web 后提出的交互调整作为 Phase D 后续修订，不在本阶段预设复杂产品规则。
+1. 重新设计 Compare/Surface 入口，拆解 maturity/strike 两个字段维度，并 revisit 信息密度。
+2. 最近坐标只允许作为实际返回轴的参考提示；任何 UI 修订都不得改变“不替代精确请求”的语义。
+3. Listed 坐标发现继续使用单日、无边界的 BNP `fixed maturity + fixed strike` Surface；expiry 和 strike 均不自动选择，只有用户点击应用才写入查询。
+4. 在实际部署主机执行 Docker build、容器 health 与持久卷复验。
 
 ## 当前验证
 
 ```text
 python -m pytest -q
-86 passed
+96 passed
 
 python -m compileall -q app scripts tests
 PASS

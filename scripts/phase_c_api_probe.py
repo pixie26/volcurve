@@ -1,4 +1,4 @@
-"""Sanitized Gate C live probe through the public FastAPI routes.
+"""Sanitized Gate C/E live probe through the public FastAPI routes.
 
 No credentials, headers, raw payloads, market values, or error bodies are
 printed or written. The report contains endpoint status and structural counts.
@@ -24,14 +24,14 @@ from app.main import app  # noqa: E402
 
 def _arguments() -> argparse.Namespace:
     yesterday = date.today() - timedelta(days=1)
-    parser = argparse.ArgumentParser(description="Run sanitized Phase C REST API probes")
+    parser = argparse.ArgumentParser(description="Run sanitized live REST API probes")
     parser.add_argument("--code", default="US_QQQ")
     parser.add_argument("--start", type=date.fromisoformat, default=yesterday - timedelta(days=10))
     parser.add_argument("--end", type=date.fromisoformat, default=yesterday)
     parser.add_argument(
         "--report",
         type=Path,
-        default=PROJECT_ROOT / "data" / "normalized" / "phase_c_probe" / "report.json",
+        default=(PROJECT_ROOT / "data" / "normalized" / "phase_e_validation" / "api_report.json"),
     )
     return parser.parse_args()
 
@@ -40,11 +40,12 @@ def _common(code: str, start: date, end: date) -> dict:
     return {"code": code, "start_date": start.isoformat(), "end_date": end.isoformat()}
 
 
-def _compare_envelope(volatility_request: dict) -> dict:
+def _compare_envelope(volatility_request: dict, *, force_refresh: bool = False) -> dict:
     return {
         "volatilityRequest": volatility_request,
         "rvWindowSessions": 5,
         "rvAlignment": "trailing",
+        "forceRefresh": force_refresh,
     }
 
 
@@ -69,7 +70,10 @@ def _safe_result(name: str, response, *, expected: int = 200) -> dict:
 
 
 def _surface_probe(client: TestClient, name: str, request: dict) -> tuple[dict, dict | None]:
-    response = client.post("/api/v1/vol/surface", json={"volatilityRequest": request})
+    response = client.post(
+        "/api/v1/vol/surface",
+        json={"volatilityRequest": request, "forceRefresh": True},
+    )
     result = _safe_result(name, response)
     if response.status_code != 200:
         return result, None
@@ -83,7 +87,9 @@ def _surface_probe(client: TestClient, name: str, request: dict) -> tuple[dict, 
 
 
 def _compare_probe(client: TestClient, name: str, request: dict) -> tuple[dict, dict | None]:
-    response = client.post("/api/v1/vol/compare", json=_compare_envelope(request))
+    response = client.post(
+        "/api/v1/vol/compare", json=_compare_envelope(request, force_refresh=True)
+    )
     result = _safe_result(name, response)
     if response.status_code != 200:
         return result, None
@@ -133,6 +139,14 @@ def main() -> int:
     if args.end < args.start:
         print("INVALID: --end must be >= --start")
         return 2
+
+    # Do not contend with a locally running Web process for the primary DuckDB
+    # file. Gate evidence is written to its own private, gitignored cache.
+    validation_root = PROJECT_ROOT / "data" / "phase_e_api_runtime"
+    settings.data_dir = validation_root
+    settings.raw_dir = validation_root / "raw"
+    settings.normalized_dir = validation_root / "normalized"
+    settings.duckdb_path = validation_root / "catalog.duckdb"
 
     common = _common(args.code, args.start, args.end)
     ks = {
@@ -228,7 +242,7 @@ def main() -> int:
         results.append(csv_result)
 
     report = {
-        "gate": "Phase C",
+        "gate": "Phase E live core-mode and API/CSV validation",
         "instrumentCode": args.code,
         "requestedStart": args.start.isoformat(),
         "requestedEnd": args.end.isoformat(),

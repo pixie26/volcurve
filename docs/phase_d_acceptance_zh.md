@@ -13,6 +13,7 @@ Phase D 与 Gate D 已完成，现提交用户检查。FastAPI 现在同时托�
 - 动态 Query Builder：`sliding_moneyness`、`sliding_delta`、`fixed_strike`、`listed_moneyness` 全部可发现；Compare 自动使用 exact low/high，Surface 显示范围字段。
 - 默认 preset：`US_QQQ`、近一年、3M、K/F 100%、RV 63 sessions、trailing。
 - Instrument 搜索：调用后端 catalogue；`hasMore=true` 时要求缩小关键词。
+- Listed 合约坐标发现：absolute-strike 模式可按 instrument + observation date 发起单日无界 `fixed+fixed` Surface 请求；expiry 下拉来自实际返回轴，strike 下拉只含该 expiry 下 effective IV 有效的点。无效点数量和 flags 仍显示；expiry、strike 和“应用坐标”都要求用户明确操作，不自动选择或替代。
 - 指标选择：IV、RV、spot、forward、IV−RV、IV/RV、percentile、z-score、correlation、smile、term structure。
 - Compare 图：IV/RV/spread 与 spot/forward 分图；无效值为 `null` 且 Plotly `connectgaps=false`。
 - Surface 图：按日期切片显示 smile 和 term structure；响应和 CSV 仍保留全部日期与全部点。
@@ -30,6 +31,7 @@ Phase D 与 Gate D 已完成，现提交用户检查。FastAPI 现在同时托�
 2. 用户可以切换到 Surface 并扩大查询范围查看实际返回坐标。
 3. Surface 若有可用轴，会显示“最近返回 strike / expiry”；该信息明确标为参考，不会改写请求或统计。
 4. Surface 若轴为空，只提示扩大范围，不伪造所谓最近值。
+5. Fixed absolute-strike 查询可先加载单日 listed surface，再由用户明确选择 expiry 和有效 strike；这属于坐标发现，不是从原请求推断最近值。
 
 ## 本阶段新增、且已在页面明示的展示边界
 
@@ -68,7 +70,17 @@ Browser page errors: 0
 
 Phase C 已有 live API probe；live 页面数值与独立 RV 复算、完整 CSV 对照属于 Phase E。
 
-## 请用户重点检查
+## 用户检查结论（2026-08-06）
+
+1. **Compare 与 Surface 入口：未通过。** 当前单组 segmented control 不够直观；允许先完成 Phase E，之后单独重做入口与信息架构。
+2. **四种模式字段：需要进一步解释并重构命名。** 当前模式名同时编码 maturity 与 strike 两个维度，且下方又重复显示 rule 字段，认知负担偏高；后续应考虑把两个维度拆开呈现。
+3. **最近 strike/expiry：需要明确指出出现位置。** Compare 只在精确坐标缺失时建议转到 Surface，不计算最近值；Surface 才会基于实际返回轴显示最近参考，并标明不替代请求。
+4. **信息密度：保留意见。** Phase E 后必须重新检查图表、表格、methodology、quality 与 activity 的层级和默认展开策略。
+5. **CSV 下载位置：通过。**
+
+以上第 1、2、3、4 项进入 Phase E 后的 UI revisit 清单，不在 Phase E 验证与部署过程中擅自改变已验证的请求语义。
+
+## 原检查清单
 
 启动后打开 `http://127.0.0.1:8000/`：
 
@@ -84,7 +96,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 4. 图表、表格、methodology、quality 和 activity 的信息密度是否可接受。
 5. CSV 下载位置是否符合习惯。
 
-确认后再进入 Phase E；页面交互细节也可以等实际使用后再调整。
+用户已允许先进入 Phase E；页面交互细节在 Phase E 完成后继续调整。
 
 ## 验证命令
 

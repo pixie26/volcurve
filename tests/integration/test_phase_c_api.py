@@ -163,6 +163,34 @@ def test_fixture_mode_all_public_endpoints_and_surface_modes(api_client):
         assert payload["activity"][-1]["code"] == "ANALYTICS_COMPLETED"
 
 
+def test_listed_fixed_surface_can_discover_coordinates_without_bounds(api_client):
+    response = api_client.post(
+        "/api/v1/vol/surface",
+        json={
+            "volatilityRequest": {
+                "code": "US_QQQ",
+                "start_date": "2026-08-03",
+                "end_date": "2026-08-03",
+                "maturity_rule": "fixed",
+                "strike_rule": "fixed",
+                "layout": "matrix",
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    snapshot = payload["snapshots"][0]
+    assert snapshot["maturities"] == ["2026-09-18", "2026-12-18"]
+    assert snapshot["strikes"] == ["600.0", "620.0"]
+    assert {(point["maturity"], point["strike"]) for point in snapshot["points"]} == {
+        ("2026-09-18", "600.0"),
+        ("2026-09-18", "620.0"),
+        ("2026-12-18", "600.0"),
+        ("2026-12-18", "620.0"),
+    }
+
+
 def test_compare_and_csv_have_identical_values(api_client):
     body = _sliding_ks_compare()
     json_response = api_client.post("/api/v1/vol/compare", json=body)

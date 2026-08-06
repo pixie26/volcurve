@@ -11,7 +11,7 @@ Also verifies:
 - forward RV tail is null
 - no zero-filling anywhere
 
-Writes data/normalized/validation/rv_recheck.csv for Excel cross-check
+Writes data/normalized/phase_e_validation/rv_recheck.csv for Excel cross-check
 (Excel: STDEV.S(log returns) * SQRT(252)).
 
 Usage: python scripts/validate_rv.py
@@ -20,6 +20,7 @@ Usage: python scripts/validate_rv.py
 from __future__ import annotations
 
 import csv
+import json
 import math
 import sys
 from datetime import date
@@ -31,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.analytics.alignment import warmup_start  # noqa: E402
 from app.analytics.engine import run_compare  # noqa: E402
 from app.clients.cortex.client import CortexClient  # noqa: E402
-from app.config import get_settings  # noqa: E402
+from app.config import PROJECT_ROOT, get_settings  # noqa: E402
 from app.domain.requests import ImpliedVolRequest  # noqa: E402
 
 TOL = 1e-10
@@ -56,6 +57,13 @@ def independent_rv(dates: list[str], spots: list[float], window: int) -> list[fl
 
 def main() -> int:
     settings = get_settings()
+    # Keep Gate E isolated from a locally running Web process that may hold the
+    # primary DuckDB file open on Windows. This is also a fresh live evidence set.
+    validation_root = PROJECT_ROOT / "data" / "phase_e_runtime"
+    settings.data_dir = validation_root
+    settings.raw_dir = validation_root / "raw"
+    settings.normalized_dir = validation_root / "normalized"
+    settings.duckdb_path = validation_root / "catalog.duckdb"
     client = CortexClient(settings)
 
     fetch_from = warmup_start(DISPLAY_FROM, WINDOW)
@@ -71,7 +79,7 @@ def main() -> int:
         low_maturity="3M",
         high_maturity="3M",
     )
-    observations, fetch = client.get_implied_volatility(request)
+    observations, fetch = client.get_implied_volatility(request, force_refresh=True)
     print(
         f"fetched {len(observations)} obs from {fetch_from} to {DISPLAY_TO} "
         f"(cacheStatus={fetch.cache_status})"
@@ -134,6 +142,16 @@ def main() -> int:
     else:
         print("PASS: IV equals raw matrix value at resolved coordinates")
 
+    valid_iv_rows = [row for row in out_rows if isinstance(row[2], (int, float))]
+    if len(valid_iv_rows) < 10:
+        ok = False
+        print(f"FAIL: only {len(valid_iv_rows)} valid IV dates; Gate E requires 10")
+        iv_sample = valid_iv_rows
+    else:
+        sample_indexes = [round(i * (len(valid_iv_rows) - 1) / 9) for i in range(10)]
+        iv_sample = [valid_iv_rows[index] for index in sample_indexes]
+        print("PASS: 10 distributed business dates selected for IV raw/engine audit")
+
     zero_filled = [r for r in out_rows if r[3] == 0.0]
     if zero_filled:
         ok = False
@@ -170,7 +188,7 @@ def main() -> int:
         print("FAIL: forward RV tail not null")
 
     # --- CSV for Excel cross-check ---
-    out_dir = Path(__file__).resolve().parent.parent / "data" / "normalized" / "validation"
+    out_dir = PROJECT_ROOT / "data" / "normalized" / "phase_e_validation"
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "rv_recheck.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
@@ -178,8 +196,28 @@ def main() -> int:
         w.writerow(["date", "spot", "iv_raw", "rv_engine", "rv_independent", "abs_diff"])
         w.writerows(out_rows)
     print(f"\nwrote {csv_path}")
-    print(f"sample: {out_rows[0]}\n        {out_rows[-1]}")
-    print("\nGate 3 " + ("PASS" if ok else "FAIL"))
+    print(f"private CSV coverage: {out_rows[0][0]} .. {out_rows[-1][0]} (values not logged)")
+    sanitized_report = {
+        "gate": "Phase E numerical validation",
+        "instrumentCode": request.code,
+        "requestedDisplayStart": DISPLAY_FROM.isoformat(),
+        "requestedDisplayEnd": DISPLAY_TO.isoformat(),
+        "rvWindowSessions": WINDOW,
+        "rvAlignment": "trailing",
+        "displayRows": len(result.series),
+        "ivSampleDates": [row[0] for row in iv_sample],
+        "ivSampleCount": len(iv_sample),
+        "ivMismatchCount": len(iv_mismatches),
+        "rvMismatchCount": len(mismatches),
+        "tolerance": TOL,
+        "marketValuesStoredInReport": False,
+        "status": "PASS" if ok else "FAIL",
+    }
+    report_path = out_dir / "numerical_report.json"
+    report_path.write_text(json.dumps(sanitized_report, indent=2), encoding="utf-8")
+    print(f"sanitized report: {report_path}")
+    client._catalog.close()
+    print("\nGate E numerical validation " + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
 

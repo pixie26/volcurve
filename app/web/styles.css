@@ -58,6 +58,18 @@ button { color: inherit; }
 .icon-button { height: 38px; border: 1px solid #cbd3c8; border-radius: 8px; background: var(--panel); cursor: pointer; font-size: 20px; }
 .coordinate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
 .inline-note { margin: 10px 0 0; padding: 9px 10px; color: var(--muted); background: rgba(255,255,255,.5); border-left: 3px solid var(--green); font-size: 10px; line-height: 1.5; }
+.coordinate-discovery { margin-top: 12px; padding: 11px; background: #eef7f1; border: 1px solid #bedac9; border-radius: 10px; }
+.coordinate-discovery-heading strong, .coordinate-discovery-heading small { display: block; }
+.coordinate-discovery-heading strong { color: var(--green-dark); font-size: 11px; }
+.coordinate-discovery-heading small { margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.discovery-loader { grid-template-columns: minmax(0,1fr) auto; align-items: end; margin-top: 9px; }
+.discovery-loader .secondary-button { height: 38px; }
+.discovery-selectors { margin-top: 10px; }
+.coordinate-discovery-status, .coordinate-discovery-error { margin: 9px 0 0; font-size: 9px; line-height: 1.5; }
+.coordinate-discovery-status { color: #3c5548; }
+.coordinate-discovery-error { color: #963b30; }
+.discovery-apply { width: 100%; margin-top: 8px; }
+.secondary-button:disabled { cursor: not-allowed; opacity: .55; }
 .indicator-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .indicator-option input { position: absolute; opacity: 0; }
 .indicator-option span { display: block; padding: 7px 8px; color: var(--muted); background: rgba(255,255,255,.55); border: 1px solid transparent; border-radius: 7px; font-size: 10px; cursor: pointer; }

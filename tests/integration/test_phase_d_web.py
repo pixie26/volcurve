@@ -62,3 +62,18 @@ def test_web_keeps_missing_coordinates_and_arbitrary_rv_windows_explicit():
     assert "不会自动取最近档位" in javascript
     assert "Number.isInteger(window)" in javascript
     assert "connectgaps: false" in javascript
+
+
+def test_web_discovers_listed_contract_coordinates_without_auto_substitution():
+    with TestClient(app) as client:
+        javascript = client.get("/static/app.js").text
+
+    assert "加载可用坐标" in javascript
+    assert 'maturity_rule: "fixed"' in javascript
+    assert 'strike_rule: "fixed"' in javascript
+    discovery_function = javascript.split("async function loadListedCoordinates", 1)[1].split(
+        "function renderAvailableStrikes", 1
+    )[0]
+    assert "low_fixed_strike" not in discovery_function
+    assert "系统未自动选择 strike" in javascript
+    assert "这是用户选择，不是最近坐标替代" in javascript
