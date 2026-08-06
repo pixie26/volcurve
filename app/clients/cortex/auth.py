@@ -90,9 +90,7 @@ class AuthenticationManager:
                 status=response.status_code,
             )
         if response.status_code == 429:
-            raise CortexError(
-                ErrorCode.UPSTREAM_RATE_LIMITED, "认证服务限流", status=429
-            )
+            raise CortexError(ErrorCode.UPSTREAM_RATE_LIMITED, "认证服务限流", status=429)
         if response.status_code >= 500:
             raise CortexError(
                 ErrorCode.UPSTREAM_UNAVAILABLE, "认证服务暂时不可用", status=response.status_code

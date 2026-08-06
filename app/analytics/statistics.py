@@ -48,7 +48,7 @@ def zscore(series: list[float | None], value: float | None) -> float | None:
 
 def correlation(xs: list[float | None], ys: list[float | None]) -> float | None:
     """Pearson correlation over paired valid observations (needs >= 3 pairs)."""
-    pairs = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
+    pairs = [(x, y) for x, y in zip(xs, ys, strict=True) if x is not None and y is not None]
     if len(pairs) < 3:
         return None
     xvals = [p[0] for p in pairs]

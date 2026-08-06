@@ -15,7 +15,14 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 
-load_dotenv(PROJECT_ROOT / ".env")
+
+def _load_local_env(path: Path = PROJECT_ROOT / ".env", *, override: bool = False) -> bool:
+    """Load a local dotenv file, accepting the UTF-8 BOM emitted by some editors."""
+
+    return load_dotenv(path, encoding="utf-8-sig", override=override)
+
+
+_load_local_env()
 
 
 class ConfigError(RuntimeError):
@@ -29,9 +36,11 @@ class Settings:
         self.bnp_token_url = os.getenv(
             "BNP_TOKEN_URL", "https://api.cib.bnpparibas.com/oauth2/v1/token"
         ).strip()
-        self.bnp_base_url = os.getenv(
-            "BNP_BASE_URL", "https://api.cib.bnpparibas.com/gm-cortex-datahub"
-        ).strip().rstrip("/")
+        self.bnp_base_url = (
+            os.getenv("BNP_BASE_URL", "https://api.cib.bnpparibas.com/gm-cortex-datahub")
+            .strip()
+            .rstrip("/")
+        )
         # live = call BNP; fixture = offline mode backed by tests/fixtures
         self.cortex_mode = os.getenv("CORTEX_MODE", "live").strip().lower()
         # Official samples disable TLS verification for proxied corporate
@@ -50,9 +59,7 @@ class Settings:
 
     def require_credentials(self) -> None:
         if not self.credentials_configured:
-            raise ConfigError(
-                "BNP_CLIENT_ID/BNP_CLIENT_SECRET 未配置,请在 .env 中填写后重试"
-            )
+            raise ConfigError("BNP_CLIENT_ID/BNP_CLIENT_SECRET 未配置,请在 .env 中填写后重试")
 
 
 @lru_cache

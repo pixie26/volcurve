@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SurfaceEntry(BaseModel):
@@ -15,6 +15,8 @@ class SurfaceEntry(BaseModel):
     - time/timeZone may be null
     """
 
+    model_config = ConfigDict(extra="allow")
+
     date: str
     time: str | None = None
     timeZone: str | None = None
@@ -23,11 +25,11 @@ class SurfaceEntry(BaseModel):
     strikeRule: str | None = None
     volatilityConvention: str | None = None
     spot: float | None = None
-    maturities: list[str] = []
-    strikes: list[str] = []
-    forwardCurve: list[float | None] = []
-    zcCurve: list[float | None] = []
-    matrix: list[list[float | None]] = []
+    maturities: list[str] = Field(default_factory=list)
+    strikes: list[str] = Field(default_factory=list)
+    forwardCurve: list[float | None] = Field(default_factory=list)
+    zcCurve: list[float | None] = Field(default_factory=list)
+    matrix: list[list[float | None]] = Field(default_factory=list)
     vector: list[float | None] | None = None
 
     @field_validator("date")

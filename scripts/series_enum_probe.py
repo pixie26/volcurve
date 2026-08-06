@@ -52,7 +52,16 @@ def fetch(client: httpx.Client, token: str, base: str, itype: str) -> list:
 
 def summarize_quantvault(instruments: list) -> None:
     """description = 'Model Type | Model | Asset Class | Classification | Asset | Region | Country | Fields'."""
-    fields = ["modelType", "model", "assetClass", "classification", "asset", "region", "country", "fields"]
+    fields = [
+        "modelType",
+        "model",
+        "assetClass",
+        "classification",
+        "asset",
+        "region",
+        "country",
+        "fields",
+    ]
     buckets: dict[str, Counter] = {f: Counter() for f in fields}
     n_desc = 0
     for inst in instruments:
@@ -60,7 +69,7 @@ def summarize_quantvault(instruments: list) -> None:
         parts = [p.strip() for p in desc.split("|")]
         if len(parts) >= len(fields):
             n_desc += 1
-            for name, val in zip(fields, parts):
+            for name, val in zip(fields, parts, strict=False):
                 if val:
                     buckets[name][val] += 1
     print(f"  descriptions parsed: {n_desc}/{len(instruments)}")
@@ -78,7 +87,9 @@ def main() -> int:
     token = auth.get_token()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    with httpx.Client(verify=settings.bnp_verify_tls, proxy=settings.http_proxy, timeout=120.0) as client:
+    with httpx.Client(
+        verify=settings.bnp_verify_tls, proxy=settings.http_proxy, timeout=120.0
+    ) as client:
         for itype in SERIES_TYPES:
             print(f"\n=== type={itype} ===")
             instruments = fetch(client, token, settings.bnp_base_url, itype)
@@ -87,7 +98,7 @@ def main() -> int:
             print(f"  count: {len(instruments)}")
             print(f"  keys : {sorted(instruments[0].keys())}")
             codes = [i.get("code") for i in instruments if i.get("code")]
-            print(f"  sample codes:")
+            print("  sample codes:")
             for c in codes[:6]:
                 print(f"    {c}")
             (OUT_DIR / f"instruments_{itype}_full.json").write_text(

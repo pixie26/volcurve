@@ -18,11 +18,12 @@ CREATE TABLE IF NOT EXISTS requests (
     end_date       DATE,
     request_json   VARCHAR,
     response_hash  VARCHAR,
-    retrieved_at   TIMESTAMP NOT NULL,
+    retrieved_at   TIMESTAMPTZ NOT NULL,
     status         VARCHAR NOT NULL,
     cache_policy   VARCHAR NOT NULL,
     correlation_id VARCHAR,
-    quality_status VARCHAR
+    quality_status VARCHAR,
+    error_code     VARCHAR
 )
 """
 
@@ -34,24 +35,36 @@ class Catalog:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.execute(_DDL)
+            self._conn.execute("ALTER TABLE requests ADD COLUMN IF NOT EXISTS error_code VARCHAR")
 
     def get(self, request_hash: str) -> dict | None:
         with self._lock:
             row = self._conn.execute(
                 "SELECT request_hash, endpoint, api_version, instrument, start_date,"
-                "       end_date, response_hash, retrieved_at, status, cache_policy,"
-                "       correlation_id, quality_status"
+                "       end_date, request_json, response_hash, retrieved_at, status, cache_policy,"
+                "       correlation_id, quality_status, error_code"
                 " FROM requests WHERE request_hash = ?",
                 [request_hash],
             ).fetchone()
         if row is None:
             return None
         keys = (
-            "request_hash", "endpoint", "api_version", "instrument", "start_date",
-            "end_date", "response_hash", "retrieved_at", "status", "cache_policy",
-            "correlation_id", "quality_status",
+            "request_hash",
+            "endpoint",
+            "api_version",
+            "instrument",
+            "start_date",
+            "end_date",
+            "request_json",
+            "response_hash",
+            "retrieved_at",
+            "status",
+            "cache_policy",
+            "correlation_id",
+            "quality_status",
+            "error_code",
         )
-        return dict(zip(keys, row))
+        return dict(zip(keys, row, strict=True))
 
     def upsert(
         self,
@@ -69,14 +82,30 @@ class Catalog:
         cache_policy: str,
         correlation_id: str,
         quality_status: str,
+        error_code: str | None = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO requests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO requests ("
+                "request_hash, endpoint, api_version, instrument, start_date, end_date, "
+                "request_json, response_hash, retrieved_at, status, cache_policy, "
+                "correlation_id, quality_status, error_code"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    request_hash, endpoint, api_version, instrument, start_date,
-                    end_date, request_json, response_hash, retrieved_at, status,
-                    cache_policy, correlation_id, quality_status,
+                    request_hash,
+                    endpoint,
+                    api_version,
+                    instrument,
+                    start_date,
+                    end_date,
+                    request_json,
+                    response_hash,
+                    retrieved_at,
+                    status,
+                    cache_policy,
+                    correlation_id,
+                    quality_status,
+                    error_code,
                 ],
             )
 

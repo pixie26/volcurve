@@ -23,7 +23,6 @@ WINDOW_SESSIONS: dict[str, int] = {
     "1Y": 252,
 }
 MIN_WINDOW = 2
-MAX_WINDOW = 756
 
 
 def resolve_window(window: str | int) -> int:
@@ -32,17 +31,19 @@ def resolve_window(window: str | int) -> int:
     else:
         key = window.strip().upper()
         if key not in WINDOW_SESSIONS:
-            raise ValueError(f"unknown window {window!r}; use one of {sorted(WINDOW_SESSIONS)} or sessions int")
+            raise ValueError(
+                f"unknown window {window!r}; use one of {sorted(WINDOW_SESSIONS)} or sessions int"
+            )
         sessions = WINDOW_SESSIONS[key]
-    if not (MIN_WINDOW <= sessions <= MAX_WINDOW):
-        raise ValueError(f"window must be within [{MIN_WINDOW}, {MAX_WINDOW}] sessions")
+    if sessions < MIN_WINDOW:
+        raise ValueError(f"window must be at least {MIN_WINDOW} sessions")
     return sessions
 
 
 def calculate_log_returns(spots: list[float | None]) -> list[float | None]:
     """returns[i] = log(S_i / S_{i-1}); returns[0] is None; None if either price missing."""
     out: list[float | None] = [None]
-    for prev, cur in zip(spots, spots[1:]):
+    for prev, cur in zip(spots, spots[1:], strict=False):
         if prev is None or cur is None or prev <= 0 or cur <= 0:
             out.append(None)
         else:

@@ -10,6 +10,8 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 
 
@@ -24,8 +26,17 @@ class RawStore:
         path = self._path(endpoint, request_hash)
         path.parent.mkdir(parents=True, exist_ok=True)
         blob = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        with gzip.open(path, "wb") as fh:
-            fh.write(blob)
+        fd, temp_name = tempfile.mkstemp(prefix=f".{request_hash}.", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "wb") as raw_fh:
+                with gzip.GzipFile(fileobj=raw_fh, mode="wb") as gzip_fh:
+                    gzip_fh.write(blob)
+                raw_fh.flush()
+                os.fsync(raw_fh.fileno())
+            os.replace(temp_name, path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
         return path
 
     def load(self, endpoint: str, request_hash: str) -> object | None:

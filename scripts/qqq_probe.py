@@ -17,7 +17,6 @@ from __future__ import annotations
 import csv
 import json
 import sys
-from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -123,9 +122,7 @@ def main() -> int:
     (RAW_DIR / f"probe_B_kf_{START}_{END}.json").write_text(
         json.dumps(data_b, indent=1), encoding="utf-8"
     )
-    (RAW_DIR / "probe_C_grid.json").write_text(
-        json.dumps(data_c, indent=1), encoding="utf-8"
-    )
+    (RAW_DIR / "probe_C_grid.json").write_text(json.dumps(data_c, indent=1), encoding="utf-8")
 
     print(f"\nA entries: {len(data_a)}, B entries: {len(data_b)}, C entries: {len(data_c)}")
     if data_a:
@@ -145,11 +142,15 @@ def main() -> int:
         elif rows == len(strikes) and cols == len(mats):
             print("\nORIENTATION: matrix rows = strikes, cols = maturities")
         else:
-            print(f"\nORIENTATION UNRESOLVED: {rows}x{cols} vs mats={len(mats)} strikes={len(strikes)}")
+            print(
+                f"\nORIENTATION UNRESOLVED: {rows}x{cols} vs mats={len(mats)} strikes={len(strikes)}"
+            )
         flat = [v for row in matrix for v in row if v is not None]
         if flat:
-            print(f"UNITS check: min={min(flat)} max={max(flat)} "
-                  f"({'percent' if max(flat) > 3 else 'decimal'})")
+            print(
+                f"UNITS check: min={min(flat)} max={max(flat)} "
+                f"({'percent' if max(flat) > 3 else 'decimal'})"
+            )
 
     # ---- build qqq_probe.csv: join A and B by date ----
     def iv_of(entry):

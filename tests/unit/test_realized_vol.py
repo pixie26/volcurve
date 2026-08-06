@@ -5,7 +5,7 @@ from statistics import stdev
 
 import pytest
 
-from app.analytics.alignment import warmup_start
+from app.analytics.alignment import fetch_range, warmup_start
 from app.analytics.realized_vol import (
     calculate_forward_realized_vol,
     calculate_log_returns,
@@ -96,3 +96,22 @@ def test_warmup_start_covers_trading_window():
     buffer_days = (date(2025, 8, 6) - start).days
     # ceil(63*7/5) + 10 = 89 + 10 = 99 calendar days back
     assert buffer_days == 99
+
+
+def test_fetch_range_differs_for_trailing_and_forward():
+    from datetime import date
+
+    start = date(2025, 1, 2)
+    end = date(2025, 3, 31)
+    trailing = fetch_range(start, end, 63, "trailing")
+    forward = fetch_range(start, end, 63, "forward")
+    assert trailing.start < start and trailing.end == end
+    assert forward.start == start and forward.end > end
+
+
+def test_forward_fetch_range_respects_known_availability():
+    from datetime import date
+
+    cap = date(2025, 4, 15)
+    result = fetch_range(date(2025, 1, 2), date(2025, 3, 31), 63, "forward", available_through=cap)
+    assert result.end == cap

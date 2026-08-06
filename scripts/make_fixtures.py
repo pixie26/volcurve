@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -46,9 +46,7 @@ def make_implied_vol_fixture() -> None:
         ]
         entry["time"] = None
         entry["timeZone"] = None
-    (FIX / "implied_vol_surface.json").write_text(
-        json.dumps(payload, indent=1), encoding="utf-8"
-    )
+    (FIX / "implied_vol_surface.json").write_text(json.dumps(payload, indent=1), encoding="utf-8")
     print(f"implied_vol_surface.json: {len(payload)} entries (sanitized)")
 
 

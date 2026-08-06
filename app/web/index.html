@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Volcurve · Cortex Volatility Lab</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23d7f06f'/%3E%3Cpath d='M16 16h10l7 29 7-29h9L38 51H27z' fill='%2317211c'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script defer src="/static/vendor/plotly-5.24.1.min.js"></script>
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Volcurve 首页">
+        <span class="brand-mark">V</span>
+        <span><strong>VOLCURVE</strong><small>CORTEX VOLATILITY LAB</small></span>
+      </a>
+      <div class="topbar-meta">
+        <span id="apiVersion" class="api-version">API —</span>
+        <span id="healthStatus" class="status-pill status-neutral"><i></i>检查连接中</span>
+      </div>
+    </header>
+
+    <div class="app-shell">
+      <aside class="query-rail" aria-label="查询条件">
+        <div class="rail-heading">
+          <p class="eyebrow">QUERY BUILDER</p>
+          <h1>构建波动率查询</h1>
+          <p>坐标选项来自后端 capability registry。</p>
+        </div>
+
+        <form id="queryForm" novalidate>
+          <fieldset class="segmented" aria-label="查询类型">
+            <label><input type="radio" name="queryKind" value="compare" checked /><span>IV / RV 比较</span></label>
+            <label><input type="radio" name="queryKind" value="surface" /><span>Surface</span></label>
+          </fieldset>
+
+          <section class="form-section">
+            <h2>标的与日期</h2>
+            <label class="field field-wide">
+              <span>BNP instrument code</span>
+              <div class="input-action">
+                <input id="instrumentCode" name="instrumentCode" value="US_QQQ" list="instrumentOptions" autocomplete="off" />
+                <button id="instrumentSearchButton" class="icon-button" type="button" title="搜索标的">⌕</button>
+              </div>
+              <datalist id="instrumentOptions"></datalist>
+              <small id="instrumentHelp">输入代码或关键词后搜索；当前 catalogue 仅 equity。</small>
+            </label>
+            <div class="field-grid two">
+              <label class="field"><span>开始日期</span><input id="startDate" type="date" required /></label>
+              <label class="field"><span>结束日期</span><input id="endDate" type="date" required /></label>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <h2>IV 坐标</h2>
+            <label class="field field-wide"><span>请求模式</span><select id="requestMode"></select></label>
+            <div class="field-grid two">
+              <label class="field"><span>Vol convention</span><select id="volConvention"><option value="bsVol">Black-Scholes</option><option value="bnppVol">BNP convention</option></select></label>
+              <label class="field"><span>Layout</span><select id="layout"><option value="matrix">Matrix</option><option value="vector">Vector</option></select></label>
+            </div>
+            <div id="maturityRuleRow" class="field-grid two is-hidden">
+              <label class="field field-wide"><span>Maturity rule</span><select id="maturityRule"><option value="fixed">Fixed expiry</option><option value="listed">Listed expiry</option></select></label>
+            </div>
+            <div id="strikeRuleRow" class="field-grid two">
+              <label class="field field-wide"><span>Strike convention</span><select id="strikeRule"><option value="relative_to_forward">K/F · forward</option><option value="relative_to_spot_ref">K/S · spot reference</option></select></label>
+            </div>
+            <div id="coordinateFields"></div>
+            <p id="coordinateModeNote" class="inline-note"></p>
+          </section>
+
+          <section id="rvSection" class="form-section">
+            <h2>Realized volatility</h2>
+            <div class="field-grid two">
+              <label class="field"><span>Window · sessions</span><input id="rvWindow" type="number" min="2" step="1" list="rvWindowOptions" value="63" /></label>
+              <datalist id="rvWindowOptions"></datalist>
+              <label class="field"><span>Alignment</span><select id="rvAlignment"><option value="trailing">Trailing</option><option value="forward">Forward</option></select></label>
+            </div>
+            <small id="rvWindowHelp"></small>
+          </section>
+
+          <section class="form-section indicator-section">
+            <h2>显示指标</h2>
+            <div id="indicatorSelector" class="indicator-grid"></div>
+          </section>
+
+          <div id="formError" class="form-error is-hidden" role="alert"></div>
+          <button id="runButton" class="primary-button" type="submit"><span>运行查询</span><kbd>↵</kbd></button>
+        </form>
+
+        <details class="builder-disclosures">
+          <summary>查询限制与假设 <span id="builderDisclosureCount"></span></summary>
+          <div id="queryBuilderDisclosures" class="disclosure-list"></div>
+        </details>
+      </aside>
+
+      <main class="workspace">
+        <section id="welcomeState" class="welcome-state">
+          <div class="welcome-grid">
+            <article class="welcome-copy">
+              <p class="eyebrow">RESEARCH WORKSPACE</p>
+              <h2>把坐标、数据质量和方法口径放在同一个视图里。</h2>
+              <p>Compare 用于一个精确坐标的 IV/RV 时间序列；Surface 保留完整范围，用于 smile 与 term structure。系统不会把缺失坐标替换成邻近值。</p>
+              <div class="welcome-actions"><span>默认</span><strong>QQQ · 3M · K/F 100% · RV 63</strong></div>
+            </article>
+            <article class="welcome-card"><span>01</span><h3>精确坐标</h3><p>Compare 的 low/high 必须相同。</p></article>
+            <article class="welcome-card"><span>02</span><h3>原值留痕</h3><p>无效 IV 保留 raw value，有效值为空。</p></article>
+            <article class="welcome-card"><span>03</span><h3>无静默替换</h3><p>不取最近期限、strike 或 RV window。</p></article>
+          </div>
+        </section>
+
+        <section id="loadingState" class="loading-state is-hidden" aria-live="polite">
+          <div class="loader"></div><p id="loadingMessage">正在验证请求并读取数据…</p>
+        </section>
+
+        <section id="errorPanel" class="error-panel is-hidden" role="alert">
+          <div class="error-icon">!</div>
+          <div><p class="eyebrow">QUERY FAILED</p><h2 id="errorTitle">查询失败</h2><p id="errorMessage"></p><p id="errorAction" class="error-action"></p><small id="errorRequestId"></small></div>
+        </section>
+
+        <section id="resultWorkspace" class="result-workspace is-hidden">
+          <div class="result-heading">
+            <div><p id="resultEyebrow" class="eyebrow">COMPARE RESULT</p><h2 id="resultTitle">—</h2><p id="resultSubtitle">—</p></div>
+            <div class="result-actions">
+              <span id="cacheBadge" class="outline-badge">—</span>
+              <button id="csvButton" class="secondary-button" type="button">下载 CSV</button>
+            </div>
+          </div>
+
+          <div id="warningBanner" class="warning-banner is-hidden"></div>
+          <div id="coordinateHint" class="coordinate-hint is-hidden"></div>
+          <div id="summaryCards" class="summary-grid"></div>
+
+          <section id="compareCharts" class="chart-grid">
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">VOLATILITY</p><h3 id="volChartTitle">IV / RV / Spread</h3></div></div><div id="volChart" class="chart"></div></article>
+            <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">UNDERLYING</p><h3>Spot / Forward</h3></div><span class="warning-chip">未复权</span></div><div id="priceChart" class="chart"></div></article>
+          </section>
+
+          <section id="surfaceCharts" class="surface-section is-hidden">
+            <div class="surface-toolbar"><label class="field"><span>Surface 日期</span><select id="snapshotDate"></select></label><span id="surfaceCoordinateSummary"></span></div>
+            <div class="chart-grid">
+              <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">SMILE</p><h3>Strike / Delta 横截面</h3></div></div><div id="smileChart" class="chart"></div></article>
+              <article class="panel chart-panel"><div class="panel-heading"><div><p class="eyebrow">TERM STRUCTURE</p><h3>期限结构</h3></div></div><div id="termChart" class="chart"></div></article>
+            </div>
+          </section>
+
+          <section class="panel table-panel">
+            <div class="panel-heading"><div><p class="eyebrow">OBSERVATIONS</p><h3 id="tableTitle">时间序列明细</h3></div><span id="tableCount"></span></div>
+            <div class="table-scroll"><table><thead id="resultTableHead"></thead><tbody id="resultTableBody"></tbody></table></div>
+            <p id="tableFootnote" class="table-footnote"></p>
+          </section>
+
+          <div class="detail-grid">
+            <section id="methodologyPanel" class="panel detail-panel"><div class="panel-heading"><div><p class="eyebrow">METHODOLOGY</p><h3>定义与口径</h3></div></div><div id="methodologyContent"></div><div id="methodologyDisclosures" class="disclosure-list"></div></section>
+            <section id="qualityPanel" class="panel detail-panel"><div class="panel-heading"><div><p class="eyebrow">DATA QUALITY</p><h3>质量状态</h3></div><span id="qualityStatus" class="outline-badge">—</span></div><div id="qualityContent"></div><div id="qualityDisclosures" class="disclosure-list"></div></section>
+          </div>
+
+          <section id="activityPanel" class="panel activity-panel"><div class="panel-heading"><div><p class="eyebrow">ACTIVITY CONSOLE</p><h3>后台执行记录</h3></div><span id="requestIdBadge">—</span></div><ol id="activityList" class="activity-list"></ol><div id="activityDisclosures" class="disclosure-list"></div></section>
+        </section>
+      </main>
+    </div>
+
+    <noscript>此页面需要 JavaScript 才能构建查询和渲染图表。</noscript>
+  </body>
+</html>

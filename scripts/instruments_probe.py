@@ -52,11 +52,7 @@ def main() -> int:
     )
 
     q = query.lower()
-    matches = [
-        inst
-        for inst in instruments
-        if q in json.dumps(inst, ensure_ascii=False).lower()
-    ]
+    matches = [inst for inst in instruments if q in json.dumps(inst, ensure_ascii=False).lower()]
     print(f"\n'{query}' matches: {len(matches)}")
     for inst in matches[:50]:
         print(json.dumps(inst, ensure_ascii=False))

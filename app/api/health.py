@@ -21,11 +21,15 @@ def ready() -> dict:
     checks = {
         "storage_writable": _storage_writable(settings),
         "configuration": settings.credentials_configured or settings.cortex_mode == "fixture",
-        "openapi_schema_present": (settings.data_dir.parent / "schemas" / "cortex-openapi.yaml").exists(),
+        "openapi_schema_present": (
+            settings.data_dir.parent / "schemas" / "cortex-openapi.yaml"
+        ).exists(),
         "cortex_mode": settings.cortex_mode,
         "cortex_connectivity": connectivity_status(),
     }
-    healthy = checks["storage_writable"] and checks["configuration"] and checks["openapi_schema_present"]
+    healthy = (
+        checks["storage_writable"] and checks["configuration"] and checks["openapi_schema_present"]
+    )
     return {"status": "ready" if healthy else "degraded", "checks": checks}
 
 

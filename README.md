@@ -21,6 +21,7 @@ app/
   storage/          # raw 原始落盘 + normalized parquet + DuckDB 目录 + 缓存
   analytics/        # RV、对齐预热、质量标记、统计(分位/z-score/相关性)
   security/         # 日志脱敏
+  web/              # Phase D 单页 Web、样式与离线 Plotly bundle
   config.py
 scripts/            # 各 Gate 探针(auth/instruments/qqq/cache)与 fixture 生成
 tests/fixtures/     # 脱敏后的离线响应样本
@@ -49,12 +50,24 @@ CORTEX_MODE=live        # live | fixture
 - `CORTEX_MODE=live` — 真实调用 Cortex API
 - `CORTEX_MODE=fixture` — 离线模式,从 `tests/fixtures/` 读取脱敏样本,无需凭证
 
-## 安装
+## 安装（PowerShell）
 
-```bash
-python -m venv .venv && . .venv/Scripts/activate   # Windows
-pip install -e ".[dev]"
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
 ```
+
+## 启动与验证
+
+```powershell
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+python -m pytest -q
+```
+
+浏览器打开 `http://127.0.0.1:8000/`。REST 入口包括 `capabilities`、`instruments`、
+`vol/compare`、`vol/surface`、`vol/compare.csv` 与 health；页面只展示 capability registry 中
+`enabled=true` 的请求模式。
 
 ## Gate 探针(逐阶段验收)
 
@@ -77,17 +90,28 @@ pip install -e ".[dev]"
 `data/raw/` 为权威源;`data/normalized/` 与 `data/catalog.duckdb` 可从 raw 重建。
 raw 响应 gzip 压缩,以请求哈希命名;normalized 落 parquet。
 
-## 当前状态
+## 当前状态（2026-08-06 优化后）
 
 - ✅ Phase 0 — 项目骨架、离线文档、认证管理、Gate 0
 - ✅ Phase 1 — instrument + QQQ IV 探针,方向/单位确认
 - ✅ Phase 2 — Cortex 客户端(重试/429/401/缓存)、raw+DuckDB 存储、fixture 模式,Gate 2 PASS
-- ⬜ Phase 3 — RV/IV−RV/分位/z-score/相关性计算 + 单测
-- ⬜ Phase 4 — REST API(`/api/v1/instruments`、`/api/v1/vol/compare`、CSV、`/health/*`)
-- ⬜ Phase 5 — 前端页面(默认 preset:QQQ/近1年/3M/K=F 100%/63 sessions/trailing)
-- ⬜ Phase 6–7 — 校验报告、secret scan、启动说明
+- ✅ Phase 3 — RV/IV−RV/分位/z-score/相关性计算 + 独立复算
+- ✅ Phase A 正确性加固 — invalid IV、duplicate、完整 cache 状态、forward 自动追加、质量响应契约、UTC、latest comparable、return-outlier 语义（Gate A PASS）
+- ✅ Phase B — request models、独立 serializer、多模式 parser、fixtures、disclosures 与七组真实 API probes 全部通过（Gate B PASS）
+- ✅ Phase C / Phase 4 — FastAPI instruments、compare、surface、CSV、统一 errors、activity events 与 live API probes 全部通过（Gate C PASS）
+- ✅ Phase D / Phase 5 — 动态 Web、Compare/Surface、smile/term structure、表格/CSV、methodology、quality/activity/disclosures（Gate D PASS，等待用户检查）
+- ⬜ Phase E / Phase 6–7 — 独立数值核对、完整 secret/dependency scan、部署与运维说明
 
-详见 `.zcode/plans/` 下的执行计划(本目录已 gitignore)。
+代码级审阅、原计划修订意见和 Gate 状态见
+[`docs/optimization_review_zh.md`](docs/optimization_review_zh.md)。
+Phase A 的逐项验收证据见
+[`docs/phase_a_acceptance_zh.md`](docs/phase_a_acceptance_zh.md)。
+Phase B 的完整验收与 live probe 证据见
+[`docs/phase_b_acceptance_zh.md`](docs/phase_b_acceptance_zh.md)。
+Phase C 的 REST API、fixture/live Gate 与用户检查项见
+[`docs/phase_c_acceptance_zh.md`](docs/phase_c_acceptance_zh.md)。
+Phase D 的 Web 功能、浏览器验收证据与用户检查项见
+[`docs/phase_d_acceptance_zh.md`](docs/phase_d_acceptance_zh.md)。
 
 ## 安全
 

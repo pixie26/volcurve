@@ -24,6 +24,7 @@ class SeriesEntry:
     date: date
     spot: float | None
     forward: float | None
+    raw_implied_vol: float | None
     implied_vol: float | None
     realized_vol: float | None
     iv_minus_rv: float | None
@@ -54,7 +55,6 @@ def run_compare(
 
     dates = [o.date for o in observations]
     spots = [o.spot for o in observations]
-    ivs = [o.implied_vol for o in observations]
 
     if alignment == "trailing":
         rvs = calculate_trailing_realized_vol(spots, window_sessions, annualization)
@@ -64,7 +64,7 @@ def run_compare(
     extra_flags = spot_series_flags(dates, spots)
 
     series: list[SeriesEntry] = []
-    for obs, rv in zip(observations, rvs):
+    for obs, rv in zip(observations, rvs, strict=True):
         if not (display_from <= obs.date <= display_to):
             continue  # warm-up prefix / unrealized tail stay out of the display range
         flags = [f.value for f in obs.quality_flags if f != QualityFlag.OK]
@@ -78,6 +78,7 @@ def run_compare(
                 date=obs.date,
                 spot=obs.spot,
                 forward=obs.forward,
+                raw_implied_vol=obs.raw_implied_vol,
                 implied_vol=obs.implied_vol,
                 realized_vol=rv,
                 iv_minus_rv=stats.iv_minus_rv(obs.implied_vol, rv),
@@ -87,15 +88,29 @@ def run_compare(
         )
 
     spreads = [e.iv_minus_rv for e in series]
-    valid_pairs = [(e.implied_vol, e.realized_vol) for e in series
-                   if e.implied_vol is not None and e.realized_vol is not None]
-    latest = next((e for e in reversed(series)
-                   if e.implied_vol is not None or e.realized_vol is not None), None)
-    latest_spread = latest.iv_minus_rv if latest else None
+    valid_pairs = [
+        (e.implied_vol, e.realized_vol)
+        for e in series
+        if e.implied_vol is not None and e.realized_vol is not None
+    ]
+    latest_market = series[-1] if series else None
+    latest_iv = next((e for e in reversed(series) if e.implied_vol is not None), None)
+    latest_comparable = next(
+        (e for e in reversed(series) if e.implied_vol is not None and e.realized_vol is not None),
+        None,
+    )
+    latest_spread = latest_comparable.iv_minus_rv if latest_comparable else None
 
     summary = {
-        "latestIv": latest.implied_vol if latest else None,
-        "latestRv": latest.realized_vol if latest else None,
+        "latestMarketDate": latest_market.date if latest_market else None,
+        "latestIvDate": latest_iv.date if latest_iv else None,
+        "latestIv": latest_iv.implied_vol if latest_iv else None,
+        "latestComparableDate": latest_comparable.date if latest_comparable else None,
+        "latestComparableIv": latest_comparable.implied_vol if latest_comparable else None,
+        "latestComparableRv": latest_comparable.realized_vol if latest_comparable else None,
+        "latestComparableSpread": latest_spread,
+        # Compatibility alias retained while the Phase-4 API is completed.
+        "latestRv": latest_comparable.realized_vol if latest_comparable else None,
         "latestSpread": latest_spread,
         "spreadPercentile": stats.percentile_rank(spreads, latest_spread),
         "spreadZScore": stats.zscore(spreads, latest_spread),

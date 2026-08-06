@@ -1,0 +1,17 @@
+[
+  {
+    "date": "2026-08-03",
+    "time": null,
+    "timeZone": null,
+    "code": "US_QQQ",
+    "maturityRule": "sliding",
+    "strikeRule": "relative_to_forward",
+    "volatilityConvention": "bsVol",
+    "spot": 620.0,
+    "maturities": ["1M", "3M"],
+    "strikes": ["97.5", "100.0"],
+    "forwardCurve": [621.0, 624.0],
+    "zcCurve": [0.997, 0.990],
+    "matrix": [[0.220, 0.210], [0.235, 0.225]]
+  }
+]

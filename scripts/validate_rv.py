@@ -43,7 +43,7 @@ WINDOW = 63
 def independent_rv(dates: list[str], spots: list[float], window: int) -> list[float | None]:
     """Standalone reference implementation (stdlib only)."""
     rets = [None]
-    for a, b in zip(spots, spots[1:]):
+    for a, b in zip(spots, spots[1:], strict=False):
         rets.append(math.log(b / a))
     out: list[float | None] = []
     for i in range(len(spots)):
@@ -72,8 +72,10 @@ def main() -> int:
         high_maturity="3M",
     )
     observations, fetch = client.get_implied_volatility(request)
-    print(f"fetched {len(observations)} obs from {fetch_from} to {DISPLAY_TO} "
-          f"(cacheStatus={fetch.cache_status})")
+    print(
+        f"fetched {len(observations)} obs from {fetch_from} to {DISPLAY_TO} "
+        f"(cacheStatus={fetch.cache_status})"
+    )
 
     # --- independent reference from the raw payload ---
     raw_by_date = {}
@@ -88,7 +90,7 @@ def main() -> int:
     all_dates = [o.date.isoformat() for o in observations]
     all_spots = [raw_by_date[d]["spot"] for d in all_dates]
     ref_rv = independent_rv(all_dates, all_spots, WINDOW)
-    ref_rv_by_date = dict(zip(all_dates, ref_rv))
+    ref_rv_by_date = dict(zip(all_dates, ref_rv, strict=True))
 
     # --- engine ---
     result = run_compare(

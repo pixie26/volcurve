@@ -119,12 +119,14 @@ def fetch_yahoo(symbol: str, start: date, end: date) -> pd.DataFrame:
             adjcloses = res["indicators"].get("adjclose", [{}])[0].get("adjclose")
             divs = res.get("events", {}).get("dividends", {})
             rows = []
-            for t, c, a in zip(ts, closes, adjcloses or [None] * len(ts)):
+            for t, c, a in zip(ts, closes, adjcloses or [None] * len(ts), strict=True):
                 d = datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat()
                 rows.append({"date": d, "close": c, "adjclose": a})
             df = pd.DataFrame(rows).dropna(subset=["close"])
             total_div = sum(v.get("amount", 0) for v in divs.values())
-            print(f"  Yahoo {symbol}: {len(df)} days, {len(divs)} dividends, total=${total_div:.2f}")
+            print(
+                f"  Yahoo {symbol}: {len(df)} days, {len(divs)} dividends, total=${total_div:.2f}"
+            )
             return df
         except Exception as exc:  # noqa: BLE001
             last_err = f"{host}: {exc}"
@@ -138,9 +140,7 @@ def ols_slope_per_year(series: pd.Series) -> float:
         return float("nan")
     x = (s.index - s.index[0]).to_series().astype(float)  # row-index distance
     y = s.values
-    slope = (len(x) * (x * y).sum() - x.sum() * y.sum()) / (
-        len(x) * (x * x).sum() - x.sum() ** 2
-    )
+    slope = (len(x) * (x * y).sum() - x.sum() * y.sum()) / (len(x) * (x * x).sum() - x.sum() ** 2)
     # avg trading days spanned per row step
     return float(slope) * 252.0
 
@@ -162,9 +162,7 @@ def main() -> int:
     yh = fetch_yahoo("QQQ", start, end)
 
     print("\n[3/3] Comparison:")
-    bnp_df = pd.DataFrame(
-        [{"date": d, "bnp_spot": s} for d, s in present.items()]
-    )
+    bnp_df = pd.DataFrame([{"date": d, "bnp_spot": s} for d, s in present.items()])
     bnp_df["date"] = pd.to_datetime(bnp_df["date"])
     yh["date"] = pd.to_datetime(yh["date"])
     m = bnp_df.merge(yh, on="date", how="inner").sort_values("date").reset_index(drop=True)
