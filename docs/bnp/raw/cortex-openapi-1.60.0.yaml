@@ -1,0 +1,1777 @@
+openapi: 3.0.1
+info:
+   title: Cortex DataHub
+   description: |
+      <br>
+
+      <h3>OVERVIEW</h3>
+      <br>
+      Cortex DataHub API allows external clients to access and discover the BNPP Global Markets Data Offer.
+      <br><br>
+      <h3>ENDPOINTS AVAILABLE</h3>
+      When using any of the Cortex DataHub endpoints, the first step is to authenticate yourself on the gateway with this endpoint :
+      <ul><li><b>POST  https://api.cib.bnpparibas.com/oauth2/v1/token</b> </li></ul>
+      You will have to enter your clientId and clientSecret in the Authorization header. If your access is granted you will get a temporary token that will allow you to use all the API endpoints. The token will have to be filled in the Authorization header of each endpoint.
+      <br>
+      The following endpoints are available with your credentials : (details in the openapi file below)
+      <ul><li><b>GET https://api.cib.bnpparibas.com/gm-cortex-datahub/v1/instruments</b>   :  Returns the list of all the equities with available historical data. Equities with implied-volatility. Swaptions. Quant Vault indicators</li></ul>
+      <ul><li><b>POST https://api.cib.bnpparibas.com/gm-cortex-datahub/v1/implied-volatility</b>   :  Returns the implied-volatility surface for the specified instrument code (between your range of dates, strikes and maturities). The result can be either 'json' or 'csv'</li></ul>
+      <ul><li><b>POST https://api.cib.bnpparibas.com/gm-cortex-datahub/v1/series</b>   :  Returns the series for the specified code (between your range of dates).
+      The series can be either a Swaption or an Quant Vault indicator.
+      The code name can be retreived from the result of a call to the 'instruments' endpoint listed above.
+      The result can be either 'json' or 'csv'</li></ul>
+      <br>Retrieve files<br>
+      <ul><li><b>GET https://api.cib.bnpparibas.com/gm-cortex-datahub/v1/market-data/dates</b>   :   Returns the list of the available dates for the caller application</li></ul>
+      <ul><li><b>GET https://api.cib.bnpparibas.com/gm-cortex-datahub/v1/market-data/dates/{date}/documents</b>   :   Returns the list of the available document names for the caller application for a date</li></ul>
+      <ul><li><b>GET https://api.cib.bnpparibas.com/gm-cortex-datahub/v1/market-data/dates/{date}/documents/{name}</b>   :   Streams the content of a raw document</li></ul> <br>
+
+      <h3>ONBOARDING PROCESS & TESTS</h3>
+      Detailed information in the onboarding documentation see tab DOC
+      <ul>
+      <li>Get your consumer key and secret :
+        <ul>
+           <li>go to Apps button on the top of this web page</li>
+           <li>click on the view button of the app created for you by our teams</li>
+           <li>show consumer key and secret for your applications</li>
+        </ul>
+      </li>
+      </ul>
+      <ul>
+      <li>3 ways to test :
+        <ul>
+           <li>try endpoints via the portal UI (sections below in this page) : calls are not available for this version </li>
+           <li>try programatically : see tab DOC in the onboarding documentation, section test</li>
+           <li>try via postman : see tab DOC in the onboarding documentation, section test</li>
+        </ul>
+      </li>
+      </ul>
+      <br>
+      <h3>SUPPORT</h3>
+      In case of technical questions (access, availability, etc.), please contact us at the following email address :
+      <ul>
+      <li>ecomeqd.production&#64;bnpparibas.com</li>
+      </ul>
+      Please be aware that you can also contact your representative sale :
+      <ul>
+      <li>dl.cortex.datahub.sales.team&#64;bnpparibas.com</li>
+      </ul>
+      <br>
+   version: 1.60.0
+servers:
+-  url: https://api.sandbox.cib.bnpparibas.com/gm-cortex-datahub-internet
+   description: PROD_INTERNET
+tags:
+-  name: cortex datahub
+   description: Cortex DataHub API
+paths:
+   /v1/series:
+      post:
+         tags:
+         - cortex datahub
+         summary: Returns a series. In json or in csv.
+         operationId: getSeries
+         requestBody:
+            content:
+               application/json:
+                  schema:
+                     $ref: '#/components/schemas/SeriesRange'
+            required: true
+         responses:
+            '200':
+               description: Request series
+               content:
+                  application/json:
+                     schema:
+                        $ref: '#/components/schemas/Series'
+                  text/csv: {
+                     }
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/rate/volatility:
+      post:
+         tags:
+         - cortex datahub
+         summary: Returns the Underlying Maturities of the Interest rate of Instrument.
+            In json.
+         operationId: getVolatility
+         requestBody:
+            content:
+               application/json:
+                  schema:
+                     $ref: '#/components/schemas/RateVolatilityRange'
+            required: true
+         responses:
+            '200':
+               description: Request Rate Volatility
+               content:
+                  application/json: {
+                     }
+                  text/csv: {
+                     }
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateway Time-out
+   /v1/implied-volatility:
+      post:
+         tags:
+         - cortex datahub
+         summary: Returns the volatility surfaces for a given range of strikes and
+            maturities, over a period of time
+         description: |
+            Here are the different combinations for *maturityRule* and *strikeRule*.
+            | Mode                                                               | maturityRule field    | strikeRule field                                     |  Mandatory Fields                                           | Optional Fields                                                                 | Forbidden Fields                                                                                           |
+            | ----------------                                                   | ------------          |  ------------                                        |-----------------------------------                          | ------------                                                                    | ------------                                                                                               |
+            | Sliding maturities and strikes                                     | empty or **sliding**  | **relative_to_forward** or **relative_to_spot_ref**  | *lowStrike*, *highStrike*, *lowMaturity* and *highMaturity* |                                                                                 | *lowFixedStrike*, *highFixedStrike*, *lowFixedMaturity* and *highFixedMaturity*                            |
+            | Listed maturities and fixed strikes                                | empty or **fixed**    | **fixed**                                            |                                                             | *lowFixedStrike*, *highFixedStrike*, *lowFixedMaturity* and *highFixedMaturity* | *lowStrike*, *highStrike*, *lowMaturity* and *highMaturity*                                                |
+            | Listed maturities and fixed strikes (same as above)                | **listed**            | **fixed**                                            |                                                             | *lowFixedStrike*, *highFixedStrike*, *lowFixedMaturity* and *highFixedMaturity* | *lowStrike*, *highStrike*, *lowMaturity* and *highMaturity*                                                |
+            | Listed maturities and sliding strikes, with theoritical maturities | **fixed**             | **relative_to_forward** or **relative_to_spot_ref**  | *lowStrike*, *highStrike*                                   | *lowFixedMaturity* and *highFixedMaturity* can be set                           | *lowFixedStrike*, *highFixedStrike*, *lowMaturity* and *highMaturity*                                      |
+            | Listed maturities and sliding strikes, no theoritical maturities   | **listed**            | **relative_to_forward** or **relative_to_spot_ref**  | *lowStrike*, *highStrike*                                   | *lowFixedMaturity* and *highFixedMaturity* can be set                           | *lowFixedStrike*, *highFixedStrike*, *lowMaturity* and *highMaturity*                                      |
+            | Volatility in delta                                                | empty or **sliding**  | **delta**                                            |                                                             | *lowDeltaStrike*, *highDeltaStrike*, *lowMaturity* and *highMaturity*           | *lowStrike*, *highStrike*, *lowFixedStrike*, *highFixedStrike*, *lowFixedMaturity* and *highFixedMaturity* |
+
+            The result can given in **json** or in **csv**. The 'Accept' header serves as a selector of the return type.
+            If it is not provided, **json** is returned.
+            | Accept           | return type |
+            | ---------------- | ------------|
+            |                  | json        |
+            | application/json | json        |
+            | text/csv         | csv         |
+         operationId: getVolatilityStream
+         requestBody:
+            content:
+               application/json:
+                  schema:
+                     $ref: '#/components/schemas/VolatilityRange'
+            required: true
+         responses:
+            '200':
+               description: Request volatility surfaces
+               content:
+                  application/json:
+                     schema:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/Volatility'
+                  text/csv: {
+                     }
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/fx/implied-volatility:
+      post:
+         tags:
+         - cortex datahub
+         summary: Returns the volatility surface for a currency pair
+         operationId: getVolatility_1
+         requestBody:
+            content:
+               application/json:
+                  schema:
+                     $ref: '#/components/schemas/FxVolatilityRange'
+            required: true
+         responses:
+            '200':
+               description: Request series
+               content:
+                  application/json:
+                     schema:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/FXVolatility'
+                  text/csv: {
+                     }
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/curves:
+      post:
+         tags:
+         - cortex datahub
+         summary: Returns a list of curves for a given range of maturities, over a
+            period of time
+         description: |3
+                  Here are the different values for *maturityRule*.
+            | Mode                                           | maturityRule field   | Optional fields                                       | Forbidden fields                           |
+            | ----------------                               | ------------         | -----------------------------------                   | -----------------------------------        |
+            | Sliding maturities                             | empty or **sliding** |  *lowMaturity* and *highMaturity*                     | *lowFixedMaturity* and *highFixedMaturity* |
+            | Listed maturities, with theoritical maturities | **fixed**            |  *lowFixedMaturity* and *highFixedMaturity*           | *lowMaturity* and *highMaturity*           |
+            | Listed maturities, no theoritical maturities   | **listed**           |  *lowFixedMaturity* and *highFixedMaturity*           | *lowMaturity* and *highMaturity*           |
+
+            The result can given in **json** or in **csv**. The 'Accept' header serves as a selector of the return type.
+            If it is not provided, **json** is returned.
+            | Accept           | return type |
+            | ---------------- | ------------|
+            |                  | json        |
+            | application/json | json        |
+            | text/csv         | csv         |
+         operationId: getCurves
+         requestBody:
+            content:
+               application/json:
+                  schema:
+                     $ref: '#/components/schemas/CurvesRange'
+            required: true
+         responses:
+            '200':
+               description: Request curves
+               content:
+                  application/json:
+                     schema:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/curves'
+                  text/csv: {
+                     }
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/market-data/dates:
+      get:
+         tags:
+         - cortex datahub
+         summary: Returns the list of the available dates for the caller application
+         operationId: getMarketDataDates
+         responses:
+            '200':
+               description: Date list
+               content:
+                  application/json:
+                     schema:
+                        $ref: '#/components/schemas/DateList'
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/market-data/dates/{date}/documents:
+      get:
+         tags:
+         - cortex datahub
+         summary: Returns the list of the available document names for the caller
+            application for a certain date
+         operationId: getDocumentList
+         parameters:
+         -  name: date
+            in: path
+            required: true
+            schema:
+               type: string
+               format: date
+         responses:
+            '200':
+               description: List of the document names
+               content:
+                  application/json:
+                     schema:
+                        $ref: '#/components/schemas/DocumentList'
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/market-data/dates/{date}/documents/{name}:
+      get:
+         tags:
+         - cortex datahub
+         summary: Streams the content of a raw document
+         operationId: getFile
+         parameters:
+         -  name: date
+            in: path
+            required: true
+            schema:
+               type: string
+               format: date
+         -  name: name
+            in: path
+            required: true
+            schema:
+               type: string
+         responses:
+            '200':
+               description: Content of the file
+               content:
+                  application/octet-stream: {
+                     }
+            '404':
+               description: Not Found
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Document could not be retreived
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/instruments:
+      get:
+         tags:
+         - cortex datahub
+         summary: Returns the list of the available instruments
+         description: "It returns the list of the instruments belonging to the data\
+            \ sets for which the caller is entitled.\n\nThe result can be filtered\
+            \ by the type of instrument.\n\nSeveral types can be passed as arguments\
+            \ to the request.\n\nIf no 'type' parameter is passed, all the available\
+            \ instruments are returned.\n\nexemples:\n\n\t# return all the available\
+            \ instruments\n\t/v1/instruments\n\n\t# return only the 'equity' and 'swaption'\
+            \ instruments\n\t/v1/instruments?type=equity&type=swaption\n\nThe result\
+            \ can given in **json** or in **csv**. The 'Accept' header serves as a\
+            \ selector of the return type.\nIf it is not provided, **json** is returned.\n\
+            | Accept           | return type |\n| ---------------- | ------------|\n\
+            |                  | json        |\n| application/json | json        |\n\
+            | text/csv         | csv         |\n"
+         operationId: getInstruments
+         parameters:
+         -  name: type
+            in: query
+            required: false
+            schema:
+               type: array
+               items:
+                  type: string
+                  enum:
+                  - equity
+                  - swaption
+                  - quantVault
+                  - irs
+                  - fxVol
+                  - commoVol
+                  - quantCredit
+                  - fxVolSurface
+                  - commoVolSurface
+                  - rateVol
+         responses:
+            '200':
+               description: Array of instruments
+               content:
+                  application/json:
+                     schema:
+                        type: array
+                        items:
+                           $ref: '#/components/schemas/Instrument'
+                  text/csv: {
+                     }
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+            404:
+               $ref: '#/components/responses/404'
+   /v1/data/{dataType}/dates:
+      get:
+         tags:
+         - cortex datahub
+         summary: Returns the list of the available dates for the requested data
+         operationId: getMarketDataDates_1
+         parameters:
+         -  name: dataType
+            in: path
+            required: true
+            schema:
+               type: string
+               enum:
+               - thematicBasket
+         responses:
+            '200':
+               description: Date list
+               content:
+                  application/json:
+                     schema:
+                        $ref: '#/components/schemas/DateList'
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/data/{dataType}/dates/{date}/names:
+      get:
+         tags:
+         - cortex datahub
+         summary: Returns the list of the available document names for the requested
+            data for a certain date
+         operationId: getDocumentList_1
+         parameters:
+         -  name: dataType
+            in: path
+            required: true
+            schema:
+               type: string
+               enum:
+               - thematicBasket
+         -  name: date
+            in: path
+            required: true
+            schema:
+               type: string
+               format: date
+         responses:
+            '200':
+               description: List of the document names
+               content:
+                  application/json:
+                     schema:
+                        $ref: '#/components/schemas/DocumentList'
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '404':
+               description: Not Found
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Internal Server Error
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+   /v1/data/{dataType}/dates/{date}/names/{name}:
+      get:
+         tags:
+         - cortex datahub
+         summary: Streams the content of a raw data
+         operationId: getFile_1
+         parameters:
+         -  name: dataType
+            in: path
+            required: true
+            schema:
+               type: string
+               enum:
+               - thematicBasket
+         -  name: date
+            in: path
+            required: true
+            schema:
+               type: string
+               format: date
+         -  name: name
+            in: path
+            required: true
+            schema:
+               type: string
+         responses:
+            '200':
+               description: Content of the file
+               content:
+                  application/octet-stream: {
+                     }
+            '404':
+               description: Not Found
+            '400':
+               description: Bad Request
+            '401':
+               description: Unauthorized
+            '403':
+               description: the caller application cannot access the requested resource
+            '405':
+               description: Method Not Allowed
+            '415':
+               description: Unsupported Media Type
+            '422':
+               description: Unprocessable Entity
+            '429':
+               description: Too Many Requests
+            '500':
+               description: Document could not be retreived
+            '502':
+               description: Bad Gateway
+            '503':
+               description: Service Unavailable
+            '504':
+               description: Gateay Time-out
+components:
+   schemas:
+      SeriesRange:
+         type: object
+         properties:
+            code:
+               type: string
+            startDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            endDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+         required:
+         - code
+         - endDate
+         - startDate
+      Series:
+         type: object
+         properties:
+            code:
+               type: string
+            ids:
+               type: array
+               items:
+                  type: string
+            values:
+               type: array
+               items:
+                  type: number
+                  format: double
+         required:
+         - code
+         - ids
+         - values
+      RateVolatilityRange:
+         type: object
+         properties:
+            code:
+               type: string
+            startDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            endDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            output:
+               type: string
+               description: "\t\tDefines the expected output mode\n\t\t| Mode    \
+                  \          | description                                       \
+                  \                         |\n\t\t| ----------------  | -------------------------------------------------------------------------\
+                  \  |\n\t\t|  Volatility       | If volatility is present, its type\
+                  \ will be included in the output response |\n\t\t|  Call       \
+                  \      | \"call\" for call prices                              \
+                  \                       |\n\t\t|  Put              | \"put\" for\
+                  \ put prices                                                   \
+                  \    |\n\t\t|  Straddle         | \"straddle\" for straddle prices\
+                  \                                             |\n"
+               enum:
+               - Volatility
+               - Call
+               - Put
+               - Straddle
+            lowExpiry:
+               type: string
+               default: 1M
+               enum:
+               - 1M
+               - 3M
+               - 6M
+               - 9M
+               - 12M
+               - 18M
+               - 2Y
+               - 3Y
+               - 4Y
+               - 5Y
+               - 7Y
+               - 10Y
+               - 15Y
+               - 20Y
+               - 1P28D
+               - 3P28D
+               - 6P28D
+               - 13P28D
+               - 26P28D
+               - 39P28D
+               - 52P28D
+               - 65P28D
+            highExpiry:
+               type: string
+               default: 20Y
+               enum:
+               - 1M
+               - 3M
+               - 6M
+               - 9M
+               - 12M
+               - 18M
+               - 2Y
+               - 3Y
+               - 4Y
+               - 5Y
+               - 7Y
+               - 10Y
+               - 15Y
+               - 20Y
+               - 1P28D
+               - 3P28D
+               - 6P28D
+               - 13P28D
+               - 26P28D
+               - 39P28D
+               - 52P28D
+               - 65P28D
+            lowStrike:
+               type: string
+               description: low strike (optional). If not defined, provide the full
+                  list of strikes available for the given rate.
+               enum:
+               - M200
+               - M150
+               - M100
+               - M75
+               - M50
+               - M25
+               - '0'
+               - '25'
+               - '50'
+               - '75'
+               - '100'
+               - '150'
+               - '200'
+            highStrike:
+               type: string
+               description: high strike (optional). If not defined, provide the full
+                  list of strikes available for the given rate.
+               enum:
+               - M200
+               - M150
+               - M100
+               - M75
+               - M50
+               - M25
+               - '0'
+               - '25'
+               - '50'
+               - '75'
+               - '100'
+               - '150'
+               - '200'
+         required:
+         - code
+         - endDate
+         - output
+         - startDate
+      VolatilityRange:
+         type: object
+         properties:
+            code:
+               type: string
+            codeType:
+               type: string
+               default: bnpp
+               enum:
+               - bnpp
+               - bbg
+               - isin
+               - ric
+               - sedol
+            maturityRule:
+               type: string
+               description: |
+                  This field is optional. If it is not set, the default value depends on the value of **strikeRule**.
+                  When 'strikeRule' is 'fixed', the default value is 'fixed'.
+                  When 'strikeRule' is 'relative_to_forward' or 'relative_to_spot_ref', the default value is 'sliding'.
+                  When 'strikeRule' is 'delta', the default value is 'sliding'.
+               enum:
+               - sliding
+               - fixed
+               - listed
+            strikeRule:
+               type: string
+               enum:
+               - relative_to_forward
+               - relative_to_spot_ref
+               - fixed
+               - delta
+            volatilityConvention:
+               type: string
+               default: bsVol
+               description: volatility convention. Usualy, only 'bsVol' is available.
+                  'bnppVol' is only available for the volatility on dividends.
+               enum:
+               - bsVol
+               - bnppVol
+            startDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            endDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            lowStrike:
+               type: string
+               description: low strike (optional). It must be specified when the 'strikeRule'
+                  is 'relative_to_forward' or 'relative_to_spot_ref'.
+               enum:
+               - 50
+               - 100
+               - 200
+               - 300
+               - 400
+               - 500
+               - 550
+               - 600
+               - 650
+               - 700
+               - 750
+               - 800
+               - 850
+               - 900
+               - 950
+               - 975
+               - 1000
+               - 1025
+               - 1050
+               - 1100
+               - 1150
+               - 1200
+               - 1250
+               - 1300
+               - 1350
+               - 1400
+               - 1450
+               - 1500
+               - 1600
+               - 1700
+               - 1800
+               - 1900
+               - 2000
+               - 2250
+               - 2500
+               - 2750
+            highStrike:
+               type: string
+               description: high strike (optional). It must be specified when the
+                  'strikeRule' is 'relative_to_forward' or 'relative_to_spot_ref'.
+               enum:
+               - 50
+               - 100
+               - 200
+               - 300
+               - 400
+               - 500
+               - 550
+               - 600
+               - 650
+               - 700
+               - 750
+               - 800
+               - 850
+               - 900
+               - 950
+               - 975
+               - 1000
+               - 1025
+               - 1050
+               - 1100
+               - 1150
+               - 1200
+               - 1250
+               - 1300
+               - 1350
+               - 1400
+               - 1450
+               - 1500
+               - 1600
+               - 1700
+               - 1800
+               - 1900
+               - 2000
+               - 2250
+               - 2500
+               - 2750
+            lowMaturity:
+               type: string
+               description: low maturity (optional). It must be specified when the
+                  'strikeRule' is 'relative_to_forward', 'relative_to_spot_ref' or
+                  'delta'.
+               enum:
+               - 1W
+               - 2W
+               - 3W
+               - 1M
+               - 2M
+               - 3M
+               - 4M
+               - 5M
+               - 6M
+               - 7M
+               - 8M
+               - 9M
+               - 10M
+               - 11M
+               - 12M
+               - 15M
+               - 18M
+               - 21M
+               - 24M
+               - 27M
+               - 30M
+               - 33M
+               - 36M
+               - 42M
+               - 48M
+               - 54M
+               - 60M
+               - 72M
+               - 84M
+               - 96M
+               - 108M
+               - 120M
+               - 180M
+               - 240M
+            highMaturity:
+               type: string
+               description: high maturity (optional). It must be specified when the
+                  'strikeRule' is 'relative_to_forward', 'relative_to_spot_ref' or
+                  'delta'. For 'delta' the highest possible value is 120M
+               enum:
+               - 1W
+               - 2W
+               - 3W
+               - 1M
+               - 2M
+               - 3M
+               - 4M
+               - 5M
+               - 6M
+               - 7M
+               - 8M
+               - 9M
+               - 10M
+               - 11M
+               - 12M
+               - 15M
+               - 18M
+               - 21M
+               - 24M
+               - 27M
+               - 30M
+               - 33M
+               - 36M
+               - 42M
+               - 48M
+               - 54M
+               - 60M
+               - 72M
+               - 84M
+               - 96M
+               - 108M
+               - 120M
+               - 180M
+               - 240M
+            lowDeltaStrike:
+               type: string
+               description: low strike (optional). It can be specified only when the
+                  'strikeRule' is 'delta'.
+               enum:
+               - p1_0
+               - p5_0
+               - p10_0
+               - p15_0
+               - p20_0
+               - p25_0
+               - p30_0
+               - p35_0
+               - p40_0
+               - p45_0
+               - p47_5
+               - p50_0
+               - c50_0
+               - c47_5
+               - c45_0
+               - c40_0
+               - c35_0
+               - c30_0
+               - c25_0
+               - c20_0
+               - c15_0
+               - c10_0
+               - c5_0
+               - c1_0
+            highDeltaStrike:
+               type: string
+               description: high strike (optional). It can be specified only when
+                  the 'strikeRule' is 'delta'.
+               enum:
+               - p1_0
+               - p5_0
+               - p10_0
+               - p15_0
+               - p20_0
+               - p25_0
+               - p30_0
+               - p35_0
+               - p40_0
+               - p45_0
+               - p47_5
+               - p50_0
+               - c50_0
+               - c47_5
+               - c45_0
+               - c40_0
+               - c35_0
+               - c30_0
+               - c25_0
+               - c20_0
+               - c15_0
+               - c10_0
+               - c5_0
+               - c1_0
+            lowFixedStrike:
+               type: number
+               format: float
+               description: low fixed strike (optional). It can be specified when
+                  the 'strikeRule' is set to 'fixed'. If it is not specified all the
+                  available strikes below the 'highFixedStrike' are returned.
+            highFixedStrike:
+               type: number
+               format: float
+               description: high fixed strike (optional). It can be specified when
+                  the 'strikeRule' is set to 'fixed'. If it is not specified all the
+                  available strikes above the 'lowFixedStrike' are returned.
+            lowFixedMaturity:
+               type: string
+               format: date
+               description: low fixed maturity (optional). It can be specified when
+                  the 'maturityRule' is set to 'fixed' or when the 'strikeRule' is
+                  set to 'fixed'. If it is not specified all the available maturities
+                  below the 'highFixedMaturity' are returned.
+               pattern: yyyy-MM-dd
+            highFixedMaturity:
+               type: string
+               format: date
+               description: high fixed maturity (optional). It can be specified when
+                  the 'maturityRule' is set to 'fixed' or when the 'strikeRule' is
+                  set to 'fixed'. If it is not specified all the available maturities
+                  above the 'lowFixedMaturity' are returned.
+               pattern: yyyy-MM-dd
+            layout:
+               type: string
+               default: matrix
+               enum:
+               - vector
+               - matrix
+         required:
+         - code
+         - endDate
+         - startDate
+         - strikeRule
+      Volatility:
+         type: object
+         properties:
+            date:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            time:
+               type: string
+               description: computation time. This field is optional and is present
+                  for intraday data.
+               pattern: HH:mm
+            timeZone:
+               type: string
+            code:
+               type: string
+            maturityRule:
+               type: string
+               enum:
+               - sliding
+               - fixed
+               - listed
+            strikeRule:
+               type: string
+               enum:
+               - relative_to_forward
+               - relative_to_spot_ref
+               - fixed
+               - delta
+            volatilityConvention:
+               type: string
+               description: volatility convention. Usualy, only 'bsVol' is available.
+                  'bnppVol' is only available for the volatility on dividends.
+               enum:
+               - bsVol
+               - bnppVol
+            spot:
+               type: number
+               format: float
+               description: reference spot. It may be empty for the historical data.
+            maturities:
+               type: array
+               description: maturity list of the surface. Each maturity can be either
+                  under the form of a sliding maturity (12M, 24M etc.) in the case
+                  where 'strikeRule' is 'relative_to_forward' or 'relative_to_spot_ref',
+                  or under the form of a date yyyy-MM-dd in the case where 'strikeRule'
+                  is 'fixed'.
+               items:
+                  type: string
+            strikes:
+               type: array
+               description: strike list of the surface
+               items:
+                  type: string
+            forwardCurve:
+               type: array
+               description: forward curve. One value per maturity.
+               items:
+                  type: number
+                  format: float
+            zcCurve:
+               type: array
+               description: zero-coupon curve. One value per maturity.
+               items:
+                  type: number
+                  format: float
+            matrix:
+               type: array
+               description: volatility values in a matrix. The matrix is oriented
+                  per maturities/strikes (maturities in row, and strikes in column).
+                  The field 'matrix' is only defined when the requested layout was
+                  'matrix', otherwise it is empty.
+               items:
+                  type: array
+                  items:
+                     type: number
+                     format: float
+            vector:
+               type: array
+               description: volatility values in a flat vector. The vector represents
+                  the matrix of the volatility values. That matrix is oriented per
+                  maturities/strikes (maturities in row, and strikes in column). The
+                  field 'vector' is only defined when the requested layout was 'vector',
+                  otherwise it is empty.
+               items:
+                  type: number
+                  format: float
+         required:
+         - code
+         - date
+         - forwardCurve
+         - maturities
+         - maturityRule
+         - strikeRule
+         - strikes
+         - volatilityConvention
+      FxVolatilityRange:
+         type: object
+         properties:
+            code:
+               type: string
+            startDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            endDate:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            output:
+               type: string
+               description: "\t\tDefines the expected output mode\n\t\t| Mode    \
+                  \            | description                                     |\
+                  \ possible strikes                            |\n\t\t| ----------------\
+                  \    | ------------                                    |  ------------\
+                  \                               |\n\t\t| Put_Call_Vol        | for\
+                  \ implied vol in delta                        | \"PUT10\", \"PUT25\"\
+                  , \"ATM\", \"CALL10\", \"CALL25\" |\n\t\t| RR_BF_Vol           |\
+                  \ for implied vol in risk reversal and butterfly  | \"ATM\", \"\
+                  RR25\", \"RR10\", \"BF25\", \"BF10\"       |\n\n"
+               enum:
+               - Put_Call_Vol
+               - RR_BF_Vol
+            close:
+               type: string
+               enum:
+               - EMEA
+               - APAC
+               - AMER
+            strikes:
+               type: array
+               description: |
+                  Not mandatory. If not defined, the full list of strikes related to the 'output' value is used.
+                  Otherwise, the user can define the list of strikes he/she wants (has to be compatible with the type of output: "Put_Call_Vol" vs "RR_BF_Vol")
+               items:
+                  type: string
+                  enum:
+                  - ATM
+                  - PUT10
+                  - PUT25
+                  - CALL10
+                  - CALL25
+                  - RR25
+                  - RR10
+                  - BF25
+                  - BF10
+            lowExpiry:
+               type: string
+               default: 1W
+               enum:
+               - 1D
+               - 1W
+               - 2W
+               - 1M
+               - 2M
+               - 3M
+               - 6M
+               - 9M
+               - 12M
+               - 18M
+               - 2Y
+               - 3Y
+               - 5Y
+               - 7Y
+               - 10Y
+               - 15Y
+               - 20Y
+               - 25Y
+               - 30Y
+            highExpiry:
+               type: string
+               default: 10Y
+               enum:
+               - 1D
+               - 1W
+               - 2W
+               - 1M
+               - 2M
+               - 3M
+               - 6M
+               - 9M
+               - 12M
+               - 18M
+               - 2Y
+               - 3Y
+               - 5Y
+               - 7Y
+               - 10Y
+               - 15Y
+               - 20Y
+               - 25Y
+               - 30Y
+         required:
+         - close
+         - code
+         - endDate
+         - output
+         - startDate
+      FXVolatility:
+         type: object
+         properties:
+            code:
+               type: string
+            date:
+               type: string
+               pattern: yyyy-MM-dd
+            time:
+               type: string
+               description: computation time.
+               pattern: HH:mm:ss
+            timeZone:
+               type: string
+            spot:
+               type: number
+               format: float
+               description: reference spot. Optional.
+            output:
+               type: string
+               enum:
+               - Put_Call_Vol
+               - RR_BF_Vol
+            close:
+               type: string
+               description: is not defined for intraday.
+               enum:
+               - EMEA
+               - APAC
+               - AMER
+            intraday:
+               type: boolean
+            expiries:
+               type: array
+               description: expiry list of the surface.
+               items:
+                  type: string
+            strikes:
+               type: array
+               description: strike list of the surface.
+               items:
+                  type: string
+            forwardCurve:
+               type: array
+               description: forward curve
+               items:
+                  type: number
+                  format: float
+            matrix:
+               type: array
+               description: volatility values in a matrix. The matrix is oriented
+                  per expiries/strikes (expiries in row, and strikes in column).
+               items:
+                  type: array
+                  items:
+                     type: number
+                     format: float
+         required:
+         - code
+         - date
+         - expiries
+         - matrix
+         - output
+         - strikes
+         - time
+         - timeZone
+      CurvesRange:
+         type: object
+         properties:
+            code:
+               type: string
+            codeType:
+               type: string
+               enum:
+               - bnpp
+               - bbg
+               - isin
+               - ric
+               - sedol
+            maturityRule:
+               type: string
+               default: sliding
+               description: maturity rule. This field is optional. The default value
+                  is 'maturityRule' is 'sliding'. When the value is 'fixed', the fields
+                  'lowFixedMaturity' and 'highFixedMaturity' must be set.
+               enum:
+               - sliding
+               - fixed
+               - listed
+            kinds:
+               type: array
+               items:
+                  type: string
+                  enum:
+                  - FORWARD_CURVE
+                  - VAR_SWAP_CURVE
+                  - CAPPED_VAR_SWAP_CURVE
+                  - VOL_SWAP_CURVE
+                  - CAPPED_VOL_SWAP_CURVE
+                  - ZC_CURVE
+            startDate:
+               type: string
+               format: date
+            endDate:
+               type: string
+               format: date
+            lowMaturity:
+               type: string
+               description: low maturity (optional). It can be specified when the
+                  'maturityRule' is 'sliding' or empty.
+               enum:
+               - 1W
+               - 2W
+               - 3W
+               - 1M
+               - 2M
+               - 3M
+               - 4M
+               - 5M
+               - 6M
+               - 7M
+               - 8M
+               - 9M
+               - 10M
+               - 11M
+               - 12M
+               - 15M
+               - 18M
+               - 21M
+               - 24M
+               - 27M
+               - 30M
+               - 33M
+               - 36M
+               - 42M
+               - 48M
+               - 54M
+               - 60M
+               - 72M
+               - 84M
+               - 96M
+               - 108M
+               - 120M
+               - 180M
+               - 240M
+            highMaturity:
+               type: string
+               description: high maturity (optional). It can be specified when the
+                  'maturityRule' is 'sliding' or empty.
+               enum:
+               - 1W
+               - 2W
+               - 3W
+               - 1M
+               - 2M
+               - 3M
+               - 4M
+               - 5M
+               - 6M
+               - 7M
+               - 8M
+               - 9M
+               - 10M
+               - 11M
+               - 12M
+               - 15M
+               - 18M
+               - 21M
+               - 24M
+               - 27M
+               - 30M
+               - 33M
+               - 36M
+               - 42M
+               - 48M
+               - 54M
+               - 60M
+               - 72M
+               - 84M
+               - 96M
+               - 108M
+               - 120M
+               - 180M
+               - 240M
+            lowFixedMaturity:
+               type: string
+               format: date
+               description: low fixed maturity (optional). It can be specified when
+                  the 'maturityRule' is set to 'fixed'. If it is not specified all
+                  the available maturities below the 'highFixedMaturity' are returned.
+               pattern: yyyy-MM-dd
+            highFixedMaturity:
+               type: string
+               format: date
+               description: high fixed maturity (optional). It can be specified when
+                  the 'maturityRule' is set to 'fixed'. If it is not specified all
+                  the available maturities above the 'lowFixedMaturity' are returned.
+               pattern: yyyy-MM-dd
+         required:
+         - code
+         - endDate
+         - kinds
+         - startDate
+      curves:
+         type: object
+         properties:
+            date:
+               type: string
+               format: date
+               pattern: yyyy-MM-dd
+            time:
+               type: string
+               description: computation time. This field is optional and is present
+                  for intraday data.
+               pattern: HH:mm
+            timeZone:
+               type: string
+            code:
+               type: string
+            spot:
+               type: number
+               format: float
+               description: reference spot. It may be empty for the historical data.
+            maturityRule:
+               type: string
+               description: maturity rule
+               enum:
+               - sliding
+               - fixed
+               - listed
+            maturities:
+               type: array
+               description: sliding maturities
+               items:
+                  type: string
+            forwardCurve:
+               type: array
+               description: forward curve
+               items:
+                  type: number
+                  format: float
+            varSwapCurve:
+               type: array
+               description: var swap curve
+               items:
+                  type: number
+                  format: float
+            volSwapCurve:
+               type: array
+               description: vol swap curve
+               items:
+                  type: number
+                  format: float
+            cappedVarSwapCurve:
+               type: array
+               description: capped var swap curve
+               items:
+                  type: number
+                  format: float
+            cappedVolSwapCurve:
+               type: array
+               description: capped vol swap curve
+               items:
+                  type: number
+                  format: float
+            zcCurve:
+               type: array
+               description: zc curve
+               items:
+                  type: number
+                  format: float
+         required:
+         - code
+         - date
+         - maturities
+         - maturityRule
+      DateList:
+         type: object
+         properties:
+            dates:
+               type: array
+               items:
+                  type: string
+                  format: date
+               pattern: yyyy-MM-dd
+      DocumentList:
+         type: object
+         properties:
+            documents:
+               type: array
+               items:
+                  type: string
+      Instrument:
+         type: object
+         properties:
+            code:
+               type: string
+               description: BNPP code
+            type:
+               type: string
+               description: type of the instrument
+               enum:
+               - stock
+               - index
+               - tracker
+               - dividend
+               - future_dividend
+               - swaption
+               - quantVault
+               - irs
+               - quantCredit
+               - fxVol
+               - commoVol
+               - fxVolSurface
+               - commoVolSurface
+               - rateVol
+            bbgCode:
+               type: string
+               description: Bloomberg code
+            isin:
+               type: string
+            ric:
+               type: string
+            sedol:
+               type: string
+            countryCode:
+               type: string
+            currencyCode:
+               type: string
+            currencyPair:
+               type: string
+            region:
+               type: string
+               enum:
+               - EMEA
+               - APAC
+               - AMER
+            marketPlaceCode:
+               type: string
+            marketName:
+               type: string
+            companyName:
+               type: string
+            description:
+               type: string
+            status:
+               type: string
+               description: Bloomberg market status
+               enum:
+               - ACTV
+               - TKCH
+               - DLST
+               - SUSP
+               - ACQU
+               - HALT
+               - HANP
+               - ''
+            intraday:
+               type: boolean
+               description: The intraday is available
+            volVarSwap:
+               type: boolean
+               description: The vol/var swap data is available
+            model:
+               type: string
+            underlying:
+               type: string
+               description: The maturity of the underlying rate
+            underlyingType:
+               type: string
+               description: Type of the underlying
+            volatilityType:
+               type: string
+         required:
+         - code
+         - type
+      gatewayErrors:
+         type: string
+         properties:
+            title:
+               type: string
+            detail:
+               type: string
+   securitySchemes:
+      OAuth2:
+         description: OAuth2 clientCredentials flow
+         type: oauth2
+         flows:
+            clientCredentials:
+               tokenUrl: https://api.sandbox.cib.bnpparibas.com/oauth2/v1/token
+               scopes: {
+                  }
+   responses:
+      401:
+         description: Unauthorized,  Access token is missing or invalid.
+         headers:
+            x-correlation-id:
+               $ref: '#/components/headers/correlationIdHeader'
+         content:
+            application/json:
+               schema:
+                  $ref: '#/components/schemas/gatewayErrors'
+      404:
+         description: Not found, no resource available.
+         headers:
+            x-correlation-id:
+               $ref: '#/components/headers/correlationIdHeader'
+         content:
+            application/json:
+               schema:
+                  $ref: '#/components/schemas/gatewayErrors'
+      429:
+         description: Too many requests.
+         headers:
+            x-correlation-id:
+               $ref: '#/components/headers/correlationIdHeader'
+         content:
+            application/json:
+               schema:
+                  $ref: '#/components/schemas/gatewayErrors'
+   headers:
+      correlationIdHeader:
+         description: Correlation header to be set in a request and retrieved in the
+            relevant response
+         schema:
+            type: string

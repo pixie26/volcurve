@@ -1,0 +1,1416 @@
+{
+	"info": {
+		"_postman_id": "3edd0432-ccd2-4a5e-b356-d0d334c9e7f3",
+		"name": "Cortex DataHub",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "authentication",
+			"item": [
+				{
+					"name": "get your token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const response = pm.response.json();\r",
+									"pm.globals.set(\"access_token\", response.access_token);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"strictSSL": false
+					},
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "{{clientsecret}}",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "{{clientid}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "grant_type",
+									"value": "client_credentials",
+									"description": "please fill the Autorization tab (your token will be saved in token_access variable)",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrlAuthServer}}/oauth2/v1/token",
+							"host": [
+								"{{baseUrlAuthServer}}"
+							],
+							"path": [
+								"oauth2",
+								"v1",
+								"token"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "instruments",
+			"item": [
+				{
+					"name": "get instruments list All",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get instruments list CSV",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/csv"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "equityVol",
+			"item": [
+				{
+					"name": "implied-volatility",
+					"item": [
+						{
+							"name": "get implied volatility for an instrument",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"code\": \"BNP\",\n    \"codeType\": \"bbg\",\n    \"startDate\": \"2024-06-10\",\n    \"endDate\": \"2024-06-15\",\n    \"lowMaturity\": \"1W\",\n    \"highMaturity\": \"240M\",\n    \"lowStrike\": \"50_0\",\n    \"highStrike\": \"150_0\",\n    \"strikeRule\": \"relative_to_forward\",\n    \"layout\": \"matrix\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/v1/implied-volatility",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"v1",
+										"implied-volatility"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "get implied volatility with listed maturities and strikes for an instrument",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"code\": \"BNP\",\n    \"codeType\": \"bbg\",\n    \"startDate\": \"2024-06-10\",\n    \"endDate\": \"2024-06-15\",\n    \"lowFixedMaturity\": \"2024-07-31\",\n    \"highFixedMaturity\": \"2024-08-31\",\n    \"lowFixedStrike\": \"50\",\n    \"highFixedStrike\": \"80\",\n    \"strikeRule\": \"fixed\",\n    \"layout\": \"matrix\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/v1/implied-volatility",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"v1",
+										"implied-volatility"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "get implied volatility for an instrument CSV",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "Accept",
+										"value": "text/csv"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"code\": \"BNP\",\n    \"codeType\": \"bbg\",\n    \"startDate\": \"2024-06-10\",\n    \"endDate\": \"2024-06-15\",\n    \"lowMaturity\": \"1W\",\n    \"highMaturity\": \"240M\",\n    \"lowStrike\": \"50_0\",\n    \"highStrike\": \"150_0\",\n    \"strikeRule\": \"relative_to_forward\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/v1/implied-volatility",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"v1",
+										"implied-volatility"
+									]
+								}
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "curves",
+					"item": [
+						{
+							"name": "get curves for an instrument",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{ \"code\": \"SX5E\",\n  \"codeType\": \"bbg\",\n  \"kinds\": [\"FORWARD_CURVE\", \"VAR_SWAP_CURVE\", \"VOL_SWAP_CURVE\",  \"CAPPED_VAR_SWAP_CURVE\", \"CAPPED_VOL_SWAP_CURVE\"],\n  \"startDate\": \"2024-12-13\", \"endDate\": \"2024-12-31\", \"lowMaturity\": \"1W\", \"highMaturity\": \"240M\"}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/v1/curves",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"v1",
+										"curves"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "get curves for an instrument CSV",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "Accept",
+										"value": "text/csv"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{ \"code\": \"SX5E\",\n  \"codeType\": \"bbg\",\n  \"kinds\": [\"FORWARD_CURVE\", \"VAR_SWAP_CURVE\", \"VOL_SWAP_CURVE\"],\n  \"startDate\": \"2024-12-13\", \"endDate\": \"2024-12-31\", \"lowMaturity\": \"1W\", \"highMaturity\": \"240M\"}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/v1/curves",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"v1",
+										"curves"
+									]
+								}
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "get instruments",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=equity",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "equity"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "rateVol",
+			"item": [
+				{
+					"name": "get instruments",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=rateVol",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "rateVol"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get rate vol",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"EUR3M\",\n    \"startDate\": \"2026-04-20\",\n    \"endDate\": \"2026-04-28\",\n    \"output\": \"Volatility\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/rate/volatility",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"rate",
+								"volatility"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "fxVol",
+			"item": [
+				{
+					"name": "get instruments",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "x-api-app-id",
+								"value": "DpccJSTCUjGtKTh1GeUXMdWVyjCq1LIi",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=fxVolSurface&type=commoVolSurface",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "fxVolSurface"
+								},
+								{
+									"key": "type",
+									"value": "commoVolSurface"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get implied volatility",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-api-app-id",
+								"value": "DpccJSTCUjGtKTh1GeUXMdWVyjCq1LIi"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"EURUSD\",\n    \"startDate\": \"2026-01-03\",\n    \"endDate\": \"2026-02-05\",\n    \"output\": \"RR_BF_Vol\",\n    \"close\": \"EMEA\",\n    \"lowExpiry\": \"1D\",\n    \"highExpiry\": \"10Y\",\n    \"strikes\": [\"ATM\",\"RR25\",\"BF25\"]\n}\n",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/fx/implied-volatility",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"fx",
+								"implied-volatility"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "QuantVault",
+			"item": [
+				{
+					"name": "get instruments",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/csv",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=quantVault",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "quantVault"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get instruments CSV",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/csv"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=quantVault",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "quantVault"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get series",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"BNPCFCLF\",\n    \"startDate\": \"2024-06-01\",\n    \"endDate\": \"2026-05-19\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/series",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"series"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get series CSV",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/csv"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"BNPCFCLF\",\n    \"startDate\": \"2024-06-01\",\n    \"endDate\": \"2026-05-19\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/series",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"series"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "C360",
+			"item": [
+				{
+					"name": "get instruments list quantCredit",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/csv",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=quantCredit",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "quantCredit"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get instruments list quantCredit CSV",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "text/csv"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=quantCredit",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "quantCredit"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get series C360",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"BNPPIFCEU\",\n    \"startDate\": \"2024-06-01\",\n    \"endDate\": \"2026-05-19\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/series",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"series"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get series C360 CSV",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/csv"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"BNPPIFCEU\",\n    \"startDate\": \"2024-06-01\",\n    \"endDate\": \"2026-05-19\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/series",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"series"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "series",
+			"item": [
+				{
+					"name": "get instruments list Swaption",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=swaption",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "swaption"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get instruments list IRS",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/v1/instruments?type=irs",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"instruments"
+							],
+							"query": [
+								{
+									"key": "type",
+									"value": "irs"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get series",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"SWAPTION.MXN.12M.1Y.FORWARD.OFFICIAL\",\n    \"startDate\": \"2024-06-01\",\n    \"endDate\": \"2024-10-01\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/series",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"series"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "get series CSV",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/csv"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"code\": \"SWAPTION.MXN.12M.1Y.FORWARD.OFFICIAL\",\n    \"startDate\": \"2024-06-01\",\n    \"endDate\": \"2024-10-01\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/v1/series",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"series"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "files",
+			"item": [
+				{
+					"name": "#1 get the availables dates",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/v1/market-data/dates",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"market-data",
+								"dates"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "#2 get the available docs for a date",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/v1/market-data/dates/:date/documents",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"market-data",
+								"dates",
+								":date",
+								"documents"
+							],
+							"variable": [
+								{
+									"key": "date",
+									"value": "",
+									"description": "(Required) "
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "#3 get the content of a document",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/v1/market-data/dates/:date/documents/:name",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"market-data",
+								"dates",
+								":date",
+								"documents",
+								":name"
+							],
+							"variable": [
+								{
+									"key": "date",
+									"value": "",
+									"description": "(Required) "
+								},
+								{
+									"key": "name",
+									"value": "",
+									"description": "(Required) "
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "data",
+			"item": [
+				{
+					"name": "#1 get the availables dates",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/v1/data/:dataType/dates",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"data",
+								":dataType",
+								"dates"
+							],
+							"variable": [
+								{
+									"key": "dataType",
+									"value": "thematicBasket"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "#2 get the available docs for a date",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/v1/data/:dataType/dates/:date/names",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"data",
+								":dataType",
+								"dates",
+								":date",
+								"names"
+							],
+							"variable": [
+								{
+									"key": "dataType",
+									"value": "thematicBasket"
+								},
+								{
+									"key": "date",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "#3 get the content of a document",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/v1/data/:dataType/dates/:date/names/:name",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"v1",
+								"data",
+								":dataType",
+								"dates",
+								":date",
+								"names",
+								":name"
+							],
+							"variable": [
+								{
+									"key": "dataType",
+									"value": "thematicBasket"
+								},
+								{
+									"key": "date",
+									"value": "",
+									"description": "(Required) "
+								},
+								{
+									"key": "name",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrlAuthServer",
+			"value": "https://api.cib.bnpparibas.com",
+			"type": "string"
+		},
+		{
+			"key": "baseUrl",
+			"value": "https://api.cib.bnpparibas.com/gm-cortex-datahub",
+			"type": "string"
+		},
+		{
+			"key": "clientid",
+			"value": "<your consumer key>",
+			"type": "string"
+		},
+		{
+			"key": "clientsecret",
+			"value": "<your consumer secret>",
+			"type": "string"
+		}
+	]
+}
