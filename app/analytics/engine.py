@@ -49,6 +49,7 @@ def run_compare(
     window_sessions: int,
     alignment: str,  # "trailing" | "forward"
     annualization: int = 252,
+    include_realized_vol: bool = True,
 ) -> CompareResult:
     if alignment not in ("trailing", "forward"):
         raise ValueError("alignment must be 'trailing' or 'forward'")
@@ -56,7 +57,9 @@ def run_compare(
     dates = [o.date for o in observations]
     spots = [o.spot for o in observations]
 
-    if alignment == "trailing":
+    if not include_realized_vol:
+        rvs = [None] * len(observations)
+    elif alignment == "trailing":
         rvs = calculate_trailing_realized_vol(spots, window_sessions, annualization)
     else:
         rvs = calculate_forward_realized_vol(spots, window_sessions, annualization)
@@ -69,7 +72,8 @@ def run_compare(
             continue  # warm-up prefix / unrealized tail stay out of the display range
         flags = [f.value for f in obs.quality_flags if f != QualityFlag.OK]
         flags.extend(f.value for f in extra_flags.get(obs.date, []))
-        if rv is None and QualityFlag.INSUFFICIENT_HISTORY.value not in flags:
+        # Only a caller that asked for RV can be short of history for it.
+        if include_realized_vol and rv is None and QualityFlag.INSUFFICIENT_HISTORY.value not in flags:
             flags.append(QualityFlag.INSUFFICIENT_HISTORY.value)
         if not flags:
             flags = [QualityFlag.OK.value]

@@ -185,7 +185,12 @@ button { color: inherit; }
 .readout-value.is-missing { color: #a0a8a2; font-weight: 400; }
 .indicator-chart-stack { display: grid; gap: 16px; margin-bottom: 16px; }
 .stats-panel { margin-bottom: 16px; }
-.stats-scroll { max-height: 560px; }
+/* No height cap: every statistic is meant to be readable in one pass, without an inner
+   scrollbar. overflow-x stays auto purely as an escape hatch for manually widened
+   columns — default widths are computed to fit, so it does not normally engage.
+   Both classes are on the same element, so this needs to outrank `.table-scroll`,
+   which sets max-height and is declared later in this file. */
+.table-scroll.stats-scroll { max-height: none; }
 /* The table width is set inline to the sum of the column widths. Without an explicit
    width a fixed-layout table still lets long header text widen a column past its <col>,
    so a dragged width would not survive the next render.

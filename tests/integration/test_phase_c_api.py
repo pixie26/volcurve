@@ -218,6 +218,25 @@ def test_compare_and_csv_have_identical_values(api_client):
         assert csv_point["quality_flags"] == "|".join(json_point["qualityFlags"])
 
 
+def test_compare_can_skip_realized_vol_and_reports_clean_quality(api_client):
+    """An IV-only caller gets no RV column and no warm-up warning about it."""
+    body = _sliding_ks_compare()
+
+    with_rv = api_client.post("/api/v1/vol/compare", json={**body, "includeRealizedVol": True}).json()
+    without_rv = api_client.post("/api/v1/vol/compare", json={**body, "includeRealizedVol": False}).json()
+
+    assert any(point["realizedVol"] is not None for point in with_rv["series"])
+    assert all(point["realizedVol"] is None for point in without_rv["series"])
+    # The requested coordinate itself is unaffected.
+    assert [point["impliedVol"] for point in without_rv["series"]] == [
+        point["impliedVol"] for point in with_rv["series"]
+    ]
+    assert "INSUFFICIENT_HISTORY" not in without_rv["dataQuality"]["flagCounts"]
+    assert without_rv["dataQuality"]["status"] == "OK"
+    # Default stays on, so existing callers keep RV without asking for it.
+    assert api_client.post("/api/v1/vol/compare", json=body).json()["dataQuality"] == with_rv["dataQuality"]
+
+
 def test_compare_rejects_range_before_fetch_and_returns_normalized_error(api_client):
     body = _sliding_ks_compare()
     body["volatilityRequest"]["low_strike"] = 97.5

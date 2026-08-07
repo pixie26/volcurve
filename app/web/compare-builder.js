@@ -48,6 +48,9 @@
   const DEFAULT_LABEL_WIDTH = 190;
   const DEFAULT_SERIES_WIDTH = 150;
   const MIN_COLUMN_WIDTH = 80;
+  // Auto-sized columns may go narrower than a hand-dragged one so that many indicators
+  // still fit the panel without a horizontal scrollbar.
+  const MIN_AUTO_SERIES_WIDTH = 72;
 
   const TYPE_LABELS = {
     implied_vol: "Implied volatility",
@@ -1121,10 +1124,15 @@
     } else {
       volatilityRequest = coordinateRequest(base, defaultDraft("implied_vol"), false);
     }
+    // Only an RV indicator reads the RV column, so nothing else asks for it. That keeps
+    // the hidden warm-up range unfetched and stops warm-up rows being flagged for
+    // history this indicator never uses.
+    const wantsRealizedVol = item.type === "realized_vol";
     return {
       volatilityRequest,
-      rvWindowSessions: item.type === "realized_vol" ? Number(item.config.rvWindow) : 2,
-      rvAlignment: item.type === "realized_vol" ? item.config.rvAlignment : "trailing",
+      rvWindowSessions: wantsRealizedVol ? Number(item.config.rvWindow) : 2,
+      rvAlignment: wantsRealizedVol ? item.config.rvAlignment : "trailing",
+      includeRealizedVol: wantsRealizedVol,
     };
   }
 
@@ -1698,7 +1706,9 @@
     </tr>`).join("");
     $("tableTitle").textContent = `${selectedLabel} · 完整响应明细`;
     $("tableCount").textContent = `${item.response.series.length} rows`;
-    $("tableFootnote").textContent = "Selected 列是图中该 indicator 使用的值；其余列保留后端同一响应中的载体、原值和质量信息。Raw IV 不会因无效而被删除。";
+    $("tableFootnote").textContent = item.type === "realized_vol"
+      ? "Selected 列是图中该 indicator 使用的值；其余列保留后端同一响应中的载体、原值和质量信息。Raw IV 不会因无效而被删除。"
+      : "Selected 列是图中该 indicator 使用的值；其余列保留后端同一响应中的载体、原值和质量信息。Raw IV 不会因无效而被删除。RV 列为空是因为该 indicator 没有请求 RV：不计算就不会因为预热期缺历史而报质量问题。";
   }
 
   function renderIndicatorDetailMethodology(item) {
@@ -1998,12 +2008,14 @@
     return indicatorState.columnWidths[key] || fallback;
   }
 
-  // Columns the user has never dragged spread out to fill the panel; a dragged column
-  // has its own stored width and keeps it exactly.
+  // Columns the user has never dragged share the panel width so the whole table is
+  // visible at once; they shrink below the default rather than overflow. A dragged
+  // column has its own stored width and keeps it exactly.
   function autoSeriesWidth(count, labelWidth) {
     const container = $("indicatorStatsTable")?.parentElement?.clientWidth || 0;
     if (!count || !container) return DEFAULT_SERIES_WIDTH;
-    return Math.max(DEFAULT_SERIES_WIDTH, Math.floor((container - labelWidth - 2) / count));
+    const share = Math.floor((container - labelWidth - 2) / count);
+    return Math.max(MIN_AUTO_SERIES_WIDTH, share);
   }
 
   function applyStatsTableWidth() {

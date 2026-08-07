@@ -31,6 +31,7 @@ def execute_compare_query(
             alignment=payload.rvAlignment,
             available_through=payload.availableThrough,
             force_refresh=payload.forceRefresh,
+            include_realized_vol=payload.includeRealizedVol,
         )
     except CortexError as exc:
         if exc.code in {ErrorCode.AUTHENTICATION_FAILED, ErrorCode.UPSTREAM_UNAVAILABLE}:

@@ -21,6 +21,10 @@ class CompareApiRequest(BaseModel):
     volatilityRequest: VolatilityRequest
     rvWindowSessions: RvWindow = 63
     rvAlignment: RvAlignment = "trailing"
+    # Callers that only need IV (or spot/forward) can turn RV off. That skips the hidden
+    # warm-up range as well, so those observations are not fetched and the warm-up rows
+    # are not flagged for history the caller never asked to use.
+    includeRealizedVol: bool = True
     availableThrough: date | None = None
     forceRefresh: bool = False
 

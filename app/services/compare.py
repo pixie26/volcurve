@@ -91,6 +91,7 @@ def load_compare_observations(
     alignment: str,
     available_through: date | None = None,
     force_refresh: bool = False,
+    include_realized_vol: bool = True,
 ) -> ObservationLoadResult:
     """Fetch the hidden RV range and extend an incomplete forward tail.
 
@@ -103,6 +104,18 @@ def load_compare_observations(
     availability_cap = available_through or datetime.now(UTC).date()
     if alignment == "forward" and availability_cap < display_start:
         raise ValueError("available_through must be >= display start")
+
+    # Without RV there is nothing to warm up, so the display range is the fetch range.
+    if not include_realized_vol:
+        observations, result = client.get_implied_volatility(request, force_refresh=force_refresh)
+        return ObservationLoadResult(
+            observations=observations,
+            fetch_results=[result],
+            requested_range=FetchRange(start=display_start, end=display_end),
+            extension_requests=0,
+            forward_tail_observations=0,
+            forward_tail_complete=True,
+        )
 
     initial = fetch_range(
         display_start,
@@ -185,6 +198,7 @@ def execute_compare(
     available_through: date | None = None,
     force_refresh: bool = False,
     annualization: int = 252,
+    include_realized_vol: bool = True,
 ) -> CompareExecution:
     """Load the correct hidden range, then calculate the visible comparison."""
     loaded = load_compare_observations(
@@ -194,6 +208,7 @@ def execute_compare(
         alignment=alignment,
         available_through=available_through,
         force_refresh=force_refresh,
+        include_realized_vol=include_realized_vol,
     )
     analytics = run_compare(
         loaded.observations,
@@ -202,6 +217,7 @@ def execute_compare(
         window_sessions=window_sessions,
         alignment=alignment,
         annualization=annualization,
+        include_realized_vol=include_realized_vol,
     )
     return CompareExecution(
         analytics=analytics,

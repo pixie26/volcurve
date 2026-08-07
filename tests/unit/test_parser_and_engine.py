@@ -139,6 +139,34 @@ def test_absent_snapshot_time_is_not_a_quality_problem_for_daily_data():
     assert quality.usableIvCount == len(obs)
 
 
+def test_skipping_realized_vol_removes_its_warmup_flag():
+    """An IV-only caller should not be told it lacks history for a series it never asked for."""
+    obs = parse_surface(_payload(), _request())
+    kwargs = dict(
+        display_from=date(2020, 1, 2),
+        display_to=date(2020, 1, 20),
+        window_sessions=3,
+        alignment="trailing",
+    )
+
+    with_rv = run_compare(obs, **kwargs)
+    without_rv = run_compare(obs, **kwargs, include_realized_vol=False)
+
+    assert any(entry.realized_vol is not None for entry in with_rv.series)
+    assert all(entry.realized_vol is None for entry in without_rv.series)
+    # IV is untouched either way; only the RV-derived columns go quiet.
+    assert [entry.implied_vol for entry in without_rv.series] == [
+        entry.implied_vol for entry in with_rv.series
+    ]
+    assert all(entry.iv_minus_rv is None for entry in without_rv.series)
+
+    quality_with, _ = build_quality_contract(with_rv.series)
+    quality_without, _ = build_quality_contract(without_rv.series)
+    assert quality_with.flagCounts == {QualityFlag.INSUFFICIENT_HISTORY.value: 3}
+    assert quality_without.flagCounts == {}
+    assert quality_without.status == "OK"
+
+
 def test_parser_flags_strike_mismatch():
     payload = _payload()
     payload[0]["strikes"] = ["99.5"]
