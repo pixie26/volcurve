@@ -38,10 +38,13 @@ button { color: inherit; }
 .board-menu { position: relative; }
 .board-menu summary::-webkit-details-marker { display: none; }
 .board-menu summary span { padding: 1px 5px; color: var(--ink); background: var(--lime); border-radius: 999px; font-size: 9px; font-weight: 800; }
-.board-menu summary span.board-dirty-mark { padding: 0; color: #f0b45a; background: transparent; font-size: 11px; }
+/* Unsaved changes read as red the whole way through: a hard-to-miss dot on the dark
+   topbar, and the same red on the note and the button that resolves it. */
+.board-menu summary span.board-dirty-mark { display: inline-block; width: 11px; height: 11px; margin-left: 2px; padding: 0; font-size: 0; background: #ff5f56; border-radius: 50%; box-shadow: 0 0 0 3px rgba(255,95,86,.28); }
+.board-bar:has(.board-dirty-mark:not(.is-hidden)) .board-menu summary { color: #ffd9d6; border-color: rgba(255,95,86,.55); background: rgba(255,95,86,.18); }
 /* Outranks the generic `.board-menu-popover > p` rule so the warning reads as a warning. */
-.board-menu-popover > p.board-unsaved-note { color: #77400e; background: var(--orange-soft); border-color: #edc494; }
-.board-menu-actions .secondary-button.is-emphasised { color: #fff; background: var(--green); border-color: var(--green); }
+.board-menu-popover > p.board-unsaved-note { color: #93261c; background: #fdecea; border-color: #f0b7b0; font-weight: 600; }
+.board-menu-actions .secondary-button.is-emphasised { color: #fff; background: var(--red); border-color: var(--red); }
 .board-menu-popover { position: absolute; left: 0; top: calc(100% + 8px); z-index: 30; width: 320px; padding: 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
 .board-menu-popover > p { margin: 0 0 10px; padding: 8px 10px; color: var(--green-dark); background: #eef7f1; border: 1px solid #bedac9; border-radius: 8px; font-size: 10px; line-height: 1.45; }
 .board-name-field { display: grid; gap: 5px; }
@@ -140,7 +143,7 @@ button { color: inherit; }
 .indicator-toggle input:checked + span::after { transform: translateX(11px); }
 .saved-indicator-copy { min-width: 0; }
 .saved-indicator-copy strong, .saved-indicator-copy small, .saved-indicator-copy em { display: block; }
-.saved-indicator-copy strong { overflow: hidden; text-overflow: ellipsis; font-size: 10px; white-space: nowrap; }
+.saved-indicator-copy strong { font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
 .saved-indicator-copy small { margin-top: 4px; color: var(--muted); font-size: 8px; line-height: 1.45; }
 .saved-indicator-copy em { margin-top: 5px; font-size: 8px; font-style: normal; font-weight: 800; }
 .saved-indicator-copy p { margin: 5px 0 0; color: var(--red); font-size: 8px; line-height: 1.4; }
@@ -180,7 +183,7 @@ button { color: inherit; }
 .readout-lane ul { margin: 5px 0 0; padding: 0; list-style: none; }
 .readout-lane li { display: flex; align-items: center; gap: 7px; padding: 2px 0; font-size: 10px; }
 .readout-lane li i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 2px; }
-.readout-lane li span { overflow: hidden; max-width: 260px; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.readout-lane li span { max-width: 420px; color: var(--muted); overflow-wrap: anywhere; }
 .readout-value { font-variant-numeric: tabular-nums; }
 .readout-value.is-missing { color: #a0a8a2; font-weight: 400; }
 .indicator-chart-stack { display: grid; gap: 16px; margin-bottom: 16px; }
@@ -197,7 +200,8 @@ button { color: inherit; }
    border-collapse must be `separate`: browsers ignore position:sticky on cells of a
    collapsed-border table, which silently unpins the statistic-name column. */
 .stats-table { table-layout: fixed; border-collapse: separate; border-spacing: 0; }
-.stats-table th, .stats-table td { overflow: hidden; text-overflow: ellipsis; }
+.stats-table td { overflow: hidden; text-overflow: ellipsis; }
+.stats-table th { white-space: normal; overflow-wrap: anywhere; vertical-align: bottom; }
 .stats-table th { position: relative; }
 .stats-table thead th { position: sticky; top: 0; z-index: 2; vertical-align: top; }
 /* First column pins so the statistic names stay readable while scrolling sideways. */
@@ -207,7 +211,7 @@ button { color: inherit; }
 .stats-table tbody .stats-label-cell { padding: 9px 12px; font-size: 11px; }
 .stats-table thead .stats-label-cell { z-index: 4; }
 .stats-series-head { text-align: right; }
-.stats-series-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-series-name { display: block; line-height: 1.35; overflow-wrap: anywhere; }
 .stats-series-note { display: block; margin-top: 3px; color: var(--orange); font-size: 9px; font-weight: 400; }
 .stats-table tbody td { text-align: right; }
 .stats-table tbody tr:hover .stats-label-cell { background: #e7ebe2; }
@@ -226,7 +230,10 @@ body.is-resizing-column { cursor: col-resize; user-select: none; }
 .heat-high { color: #8f2f26; background: #fde3de; }
 .stats-table [data-drag-handle] { cursor: grab; }
 .stats-table [data-drag-handle]:active { cursor: grabbing; }
-.stats-row-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-row-name { display: block; line-height: 1.35; overflow-wrap: anywhere; }
+/* A renamed row keeps a hint that the original wording is still behind it. */
+.stats-row-name.is-aliased { text-decoration: underline dotted var(--line); text-underline-offset: 3px; }
+.stats-alias-input { width: 100%; padding: 2px 4px; color: var(--ink); background: #fff; border: 1px solid var(--green); border-radius: 4px; font-size: 11px; font-weight: 700; }
 .stats-table .is-dragging { opacity: .45; }
 .stats-table .is-drop-target { box-shadow: inset 0 0 0 2px var(--green); }
 .stats-heading-actions { display: flex; align-items: center; gap: 10px; }
@@ -239,7 +246,7 @@ body.is-resizing-column { cursor: col-resize; user-select: none; }
 .stats-column-list { max-height: 300px; overflow-y: auto; }
 .stats-column-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
 .stats-column-row label { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 10px; cursor: pointer; }
-.stats-column-row label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-column-row label span { overflow-wrap: anywhere; }
 .stats-column-move { display: flex; gap: 3px; }
 .stats-column-move button { width: 20px; height: 20px; padding: 0; color: var(--muted); background: #f2f4ee; border: 1px solid var(--line); border-radius: 5px; cursor: pointer; font-size: 10px; line-height: 1; }
 .stats-column-move button:disabled { opacity: .4; cursor: not-allowed; }

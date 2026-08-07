@@ -950,6 +950,8 @@
     persistWorkspace();
     if (item.type === "derived") {
       refreshWorkspacePanels();
+      // Its operands may be switched off and therefore never loaded.
+      fetchMissingDependencies();
       return;
     }
     indicatorState.selectedDetailId = item.id;
@@ -975,6 +977,8 @@
     renderBuilderMode();
     if (item.type === "derived") {
       refreshWorkspacePanels();
+      // Editing may have repointed it at an operand that was never loaded.
+      fetchMissingDependencies();
       return;
     }
     fetchIndicator(item);
@@ -1153,7 +1157,9 @@
   }
 
   async function fetchIndicator(item) {
-    if (!item.active || !indicatorState.items.some((candidate) => candidate.id === item.id)) return;
+    // No active check here: an inactive indicator is still fetched when an active derived
+    // indicator reads it. Callers decide what is needed via itemsNeedingData().
+    if (!indicatorState.items.some((candidate) => candidate.id === item.id)) return;
     if (item.type === "derived") {
       refreshWorkspacePanels();
       return;
@@ -1196,9 +1202,42 @@
       renderDateMode();
       persistWorkspace();
     }
-    const fetchable = indicatorState.items.filter((item) => item.active && item.type !== "derived");
+    const fetchable = itemsNeedingData().filter((item) => item.type !== "derived");
     await Promise.all(fetchable.map(fetchIndicator));
     refreshWorkspacePanels();
+  }
+
+  // Being shown and being needed are different things: a switched-off indicator still
+  // has to be loaded when an active derived indicator is computed from it, otherwise the
+  // derived one has nothing to work with.
+  function itemsNeedingData() {
+    const needed = new Set(indicatorState.items.filter((item) => item.active).map((item) => item.id));
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const item of indicatorState.items) {
+        if (item.type !== "derived" || !needed.has(item.id)) continue;
+        for (const reference of [item.config.operandA, item.config.operandB]) {
+          const operand = itemById(reference);
+          if (operand && !needed.has(operand.id)) {
+            needed.add(operand.id);
+            grew = true;
+          }
+        }
+      }
+    }
+    return indicatorState.items.filter((item) => needed.has(item.id));
+  }
+
+  function isNeededButHidden(item) {
+    return !item.active && itemsNeedingData().some((needed) => needed.id === item.id);
+  }
+
+  // Fetch anything that became necessary but has no data yet.
+  function fetchMissingDependencies() {
+    for (const item of itemsNeedingData()) {
+      if (item.type !== "derived" && !item.response && item.status !== "loading") fetchIndicator(item);
+    }
   }
 
   function invalidateIndicators() {
@@ -1320,7 +1359,8 @@
     item.active = toggle.checked;
     persistWorkspace();
     refreshWorkspacePanels({ details: false });
-    if (item.active && item.type !== "derived" && !item.response) fetchIndicator(item);
+    // Switching a derived indicator on may pull in operands that were never loaded.
+    fetchMissingDependencies();
   }
 
   function addChartLane() {
@@ -1460,7 +1500,9 @@
 
   function indicatorStatus(item) {
     if (item.type === "derived" && item.status === "ready") return "已计算";
-    return { queued: "等待加载", loading: "加载中", ready: "已加载", stale: "范围已变化，待刷新", error: "加载失败" }[item.status] || item.status;
+    const label = { queued: "等待加载", loading: "加载中", ready: "已加载", stale: "范围已变化，待刷新", error: "加载失败" }[item.status] || item.status;
+    // Explains why a switched-off indicator is still being fetched.
+    return isNeededButHidden(item) ? `${label} · 供运算指标使用` : label;
   }
 
   function renderIndicatorChart() {
@@ -1825,7 +1867,11 @@
     for (const entry of stored) {
       if (!known.has(entry?.id) || seen.has(entry.id)) continue;
       seen.add(entry.id);
-      ordered.push({ id: entry.id, visible: entry.visible !== false });
+      ordered.push({
+        id: entry.id,
+        visible: entry.visible !== false,
+        alias: typeof entry.alias === "string" && entry.alias.trim() ? entry.alias.trim() : undefined,
+      });
     }
     // Columns added after the user saved their layout appear at the end, using that
     // column's own default — this is also what a first-ever visit falls through to.
@@ -1846,6 +1892,59 @@
   function visibleStatsColumns() {
     const known = new Map(STAT_COLUMNS.map((column) => [column.id, column]));
     return indicatorState.statsColumns.filter((entry) => entry.visible).map((entry) => known.get(entry.id));
+  }
+
+  // Statistic rows can be renamed to whatever the reader recognises; the original name is
+  // kept so the rename can always be undone and shown as a tooltip.
+  function statLabel(column) {
+    return statAlias(column.id) || column.label;
+  }
+
+  function statAlias(id) {
+    return indicatorState.statsColumns.find((entry) => entry.id === id)?.alias || "";
+  }
+
+  function setStatAlias(id, value) {
+    const entry = indicatorState.statsColumns.find((column) => column.id === id);
+    const column = STAT_COLUMNS.find((candidate) => candidate.id === id);
+    if (!entry || !column) return;
+    const trimmed = value.trim().slice(0, 40);
+    // Blank, or the original wording, means "no alias" rather than a literal rename.
+    entry.alias = trimmed && trimmed !== column.label ? trimmed : undefined;
+    persistStatsColumns();
+  }
+
+  function startStatAliasEdit(host) {
+    const column = STAT_COLUMNS.find((candidate) => candidate.id === host.dataset.statLabel);
+    if (!column || host.querySelector("input")) return;
+    const input = document.createElement("input");
+    input.className = "stats-alias-input";
+    input.value = statLabel(column);
+    input.setAttribute("aria-label", `${column.label} 别名`);
+    host.textContent = "";
+    host.draggable = false;
+    host.appendChild(input);
+    input.focus();
+    input.select();
+
+    const commit = (save) => {
+      input.removeEventListener("blur", onBlur);
+      if (save) setStatAlias(column.id, input.value);
+      renderIndicatorStats();
+      renderStatsColumnConfig();
+    };
+    const onBlur = () => commit(true);
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commit(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        commit(false);
+      }
+    });
+    input.addEventListener("blur", onBlur);
   }
 
   function bindStatsColumnControls() {
@@ -1918,6 +2017,10 @@
       applyStatsReorder(target.key);
     });
     table.addEventListener("dragend", clearStatsDragState);
+    table.addEventListener("dblclick", (event) => {
+      const host = event.target.closest("[data-stat-label]");
+      if (host) startStatAliasEdit(host);
+    });
   }
 
   function statsDropTarget(event) {
@@ -2033,7 +2136,7 @@
     list.innerHTML = indicatorState.statsColumns.map((entry, index) => {
       const column = known.get(entry.id);
       return `<div class="stats-column-row">
-        <label><input type="checkbox" data-column-toggle="${entry.id}" ${entry.visible ? "checked" : ""} /><span>${escapeHtml(column.label)}</span></label>
+        <label><input type="checkbox" data-column-toggle="${entry.id}" ${entry.visible ? "checked" : ""} /><span title="${escapeHtml(column.label)}">${escapeHtml(statLabel(column))}</span></label>
         <span class="stats-column-move">
           <button type="button" data-column-move="up" data-column-id="${entry.id}" ${index === 0 ? "disabled" : ""} aria-label="上移 ${escapeHtml(column.label)}">↑</button>
           <button type="button" data-column-move="down" data-column-id="${entry.id}" ${index === indicatorState.statsColumns.length - 1 ? "disabled" : ""} aria-label="下移 ${escapeHtml(column.label)}">↓</button>
@@ -2078,7 +2181,7 @@
       return;
     }
     body.innerHTML = rows.map((column) => `<tr>
-      <th scope="row" class="stats-label-cell" data-drag-row="${escapeHtml(column.id)}"><span class="stats-row-name" draggable="true" data-drag-handle title="拖动可调整统计项顺序">${escapeHtml(column.label)}</span></th>
+      <th scope="row" class="stats-label-cell" data-drag-row="${escapeHtml(column.id)}"><span class="stats-row-name ${statAlias(column.id) ? "is-aliased" : ""}" draggable="true" data-drag-handle data-stat-label="${escapeHtml(column.id)}" title="${escapeHtml(statAlias(column.id) ? `原名：${column.label} · 拖动排序 · 双击改别名` : "拖动排序 · 双击改别名")}">${escapeHtml(statLabel(column))}</span></th>
       ${series.map(({ item, stats }) => statCell(column, item, stats)).join("")}
     </tr>`).join("");
     $("indicatorStatsCount").textContent = `${series.length} series`;

@@ -383,6 +383,69 @@ def test_unsaved_board_changes_are_flagged_before_they_can_be_lost():
     assert "renderBoardState()" in persist
 
 
+def test_a_switched_off_indicator_is_still_loaded_when_a_derived_one_reads_it():
+    with TestClient(app) as client:
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert "function itemsNeedingData" in javascript
+    needed = javascript.split("function itemsNeedingData", 1)[1].split("function isNeededButHidden", 1)[0]
+    # Start from what is displayed, then pull in operands transitively.
+    assert "item.config.operandA, item.config.operandB" in needed
+
+    # The fetch guard must not refuse an inactive indicator any more.
+    fetch = javascript.split("async function fetchIndicator", 1)[1].split("async function refreshActiveIndicators", 1)[0]
+    assert "if (!item.active" not in fetch
+    assert "itemsNeedingData().filter" in javascript
+    # Turning a derived indicator on, adding one, or editing its operands can all pull in
+    # something that was never loaded.
+    assert javascript.count("fetchMissingDependencies()") >= 4
+    assert "供运算指标使用" in javascript
+
+
+def test_long_indicator_names_are_shown_in_full():
+    with TestClient(app) as client:
+        stylesheet = client.get("/static/styles.css").text
+
+    # Names identify the indicator, so they wrap rather than being cut off with an ellipsis.
+    for rule in (".saved-indicator-copy strong", ".stats-series-name", ".stats-row-name"):
+        declaration = stylesheet.split(rule + " {", 1)[1].split("}", 1)[0]
+        assert "text-overflow: ellipsis" not in declaration, rule
+        assert "overflow-wrap: anywhere" in declaration, rule
+    # Numeric cells stay clipped; only headers grow.
+    assert ".stats-table td { overflow: hidden; text-overflow: ellipsis; }" in stylesheet
+
+
+def test_statistic_rows_can_be_renamed_to_a_personal_alias():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert "双击行首可以改成你自己的别名" in html
+    assert "data-stat-label" in javascript
+    assert "function startStatAliasEdit" in javascript
+
+    setter = javascript.split("function setStatAlias", 1)[1].split("function startStatAliasEdit", 1)[0]
+    # Blank or unchanged text clears the alias instead of storing a literal rename.
+    assert 'entry.alias = trimmed && trimmed !== column.label ? trimmed : undefined' in setter
+    assert "persistStatsColumns()" in setter
+    # The alias is restored with the rest of the column layout.
+    restore = javascript.split("function restoreStatsColumns", 1)[1].split("function persistStatsColumns", 1)[0]
+    assert "alias:" in restore
+
+
+def test_unsaved_board_changes_are_signalled_in_red():
+    with TestClient(app) as client:
+        stylesheet = client.get("/static/styles.css").text
+
+    dot = stylesheet.split(".board-menu summary span.board-dirty-mark {", 1)[1].split("}", 1)[0]
+    assert "border-radius: 50%" in dot and "display: inline-block" in dot
+    assert "#ff5f56" in dot
+    # The same red continues inside the menu, on the note and on the button that fixes it.
+    assert ".board-menu-actions .secondary-button.is-emphasised { color: #fff; background: var(--red)" in stylesheet
+    note = stylesheet.split("p.board-unsaved-note {", 1)[1].split("}", 1)[0]
+    assert "#93261c" in note
+
+
 def test_statistics_table_is_transposed_with_resizable_columns():
     with TestClient(app) as client:
         html = client.get("/").text
