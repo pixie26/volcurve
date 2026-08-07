@@ -234,8 +234,11 @@ def normalize_surface_snapshots(
             snapshot_flags.append(QualityFlag.SOURCE_ORDER_CORRECTED)
         if entry.spot is None or entry.spot <= 0:
             snapshot_flags.append(QualityFlag.MISSING_SPOT)
-        if not entry.time:
-            snapshot_flags.append(QualityFlag.SNAPSHOT_TIME_MISSING)
+        # `time` is not flagged when absent: the OpenAPI contract states it "is optional
+        # and is present for intraday data", and this app only requests daily EOD
+        # history. Flagging it marked every clean observation, which forced the quality
+        # status to WARNINGS permanently and buried the flags that do mean something.
+        # source_time/source_timezone stay on the observation as plain metadata.
 
         points: list[SurfacePoint] = []
         for maturity_index, maturity in enumerate(entry.maturities):

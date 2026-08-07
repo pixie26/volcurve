@@ -152,7 +152,11 @@ DISCLOSURES = (
         category="assumption",
         severity="info",
         summary="在数据源 timeZone 实际格式完成 live 验证前，source time 与 timezone 分开保留。",
-        details=["sourceTimestamp 保持 null，避免用字符串拼接制造错误时刻。"],
+        details=[
+            "sourceTimestamp 保持 null，避免用字符串拼接制造错误时刻。",
+            "上游合约写明 time 仅在 intraday 数据出现；本系统只请求日频 EOD 历史，"
+            "因此 time 为空是正常的，不计为质量问题。",
+        ],
         appliesTo=["source_metadata"],
         frontendSurfaces=["methodology", "activity_console"],
     ),

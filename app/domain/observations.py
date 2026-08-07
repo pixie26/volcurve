@@ -25,7 +25,6 @@ class QualityFlag(str, Enum):
     RETURN_OUTLIER = "RETURN_OUTLIER"
     STALE_DATA = "STALE_DATA"
     SCHEMA_WARNING = "SCHEMA_WARNING"
-    SNAPSHOT_TIME_MISSING = "SNAPSHOT_TIME_MISSING"
 
 
 class StandardObservation(BaseModel):

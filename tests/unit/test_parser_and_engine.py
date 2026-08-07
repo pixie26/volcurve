@@ -109,6 +109,36 @@ def test_parser_rejects_conflicting_duplicate_date():
     assert exc_info.value.code == ErrorCode.AMBIGUOUS_DUPLICATE_DATE
 
 
+def test_absent_snapshot_time_is_not_a_quality_problem_for_daily_data():
+    """`time` is an intraday-only field in the upstream contract.
+
+    Flagging its absence marked every observation of a clean end-of-day series, which
+    pinned the quality status to WARNINGS forever and drowned out the flags that carry
+    real information.
+    """
+    payload = _payload()
+    assert all(entry["time"] is None for entry in payload), "fixture must model EOD data"
+
+    obs = parse_surface(payload, _request())
+    assert all(item.quality_flags == [QualityFlag.OK] for item in obs)
+    # The timestamp stays available as plain metadata; only the flag is gone.
+    assert all(item.source_time is None for item in obs)
+
+    result = run_compare(
+        obs,
+        display_from=date(2020, 1, 2),
+        display_to=date(2020, 1, 20),
+        window_sessions=3,
+        alignment="trailing",
+    )
+    quality, _activity = build_quality_contract(result.series)
+    assert "SNAPSHOT_TIME_MISSING" not in quality.flagCounts
+    # The RV warm-up is still reported: it explains why those rows have no RV.
+    assert quality.flagCounts == {QualityFlag.INSUFFICIENT_HISTORY.value: 3}
+    assert quality.invalidIvCount == 0
+    assert quality.usableIvCount == len(obs)
+
+
 def test_parser_flags_strike_mismatch():
     payload = _payload()
     payload[0]["strikes"] = ["99.5"]
