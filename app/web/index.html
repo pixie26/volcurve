@@ -112,22 +112,48 @@
             <button id="cancelEditButton" class="secondary-button cancel-edit-button is-hidden" type="button">取消编辑</button>
             <div class="saved-indicator-heading"><h2>Saved indicators</h2><span class="refresh-actions"><button id="bulkModeButton" class="text-button" type="button" title="选中多个 indicator，一次把它们换到另一个标的，或按另一个标的复制一份。">批量</button><button id="refreshIndicatorsButton" class="text-button" type="button">刷新激活项</button><button id="forceRefreshIndicatorsButton" class="text-button force-refresh-button" type="button" title="跳过本地缓存，直接向上游重新取数。上游修订过历史数据时用它。">强制刷新</button></span></div>
             <div id="bulkBar" class="bulk-bar is-hidden">
-              <div class="bulk-bar-row">
-                <strong id="bulkCount">已选 0 项</strong>
-                <span class="bulk-bar-links"><button class="text-button" type="button" data-bulk-all>全选基础指标</button><button class="text-button" type="button" data-bulk-none>清空</button><button class="text-button" type="button" data-bulk-exit>退出批量</button></span>
+              <div class="bulk-bar-row bulk-bar-heading">
+                <div><strong id="bulkCount">已选 0 项</strong><small>批量操作只改变已选 indicator；运算指标会自动带入所需操作数。</small></div>
+                <span class="bulk-bar-links"><button class="text-button" type="button" data-bulk-all>全选基础指标</button><button class="text-button" type="button" data-bulk-none>清空</button><button class="text-button" type="button" data-bulk-exit>退出</button></span>
               </div>
-              <div class="bulk-bar-row bulk-bar-apply">
+
+              <div class="bulk-mode-tabs" role="tablist" aria-label="批量编辑类型">
+                <button id="bulkUnderlyingTab" class="bulk-mode-tab is-active" type="button">Underlying</button>
+                <button id="bulkMaturityTab" class="bulk-mode-tab" type="button">Maturity</button>
+              </div>
+
+              <section id="bulkUnderlyingPanel" class="bulk-edit-panel" aria-label="批量修改标的">
+                <label class="bulk-panel-label" for="bulkInstrumentCode">目标标的</label>
                 <div class="bulk-instrument-picker">
                   <div class="input-action">
-                    <input id="bulkInstrumentCode" placeholder="搜索目标标的" autocomplete="off" aria-label="批量操作的目标标的" />
+                    <input id="bulkInstrumentCode" placeholder="搜索代码或名称" autocomplete="off" aria-label="批量操作的目标标的" />
                     <button id="bulkInstrumentSearchButton" class="icon-button" type="button" title="搜索目标标的">⌕</button>
                   </div>
                   <div id="bulkInstrumentResults" class="instrument-results is-hidden" role="listbox" aria-label="批量改标搜索结果"></div>
                   <small id="bulkInstrumentHelp">输入代码或名称后按 Enter 或点 ⌕ 搜索，再从结果里点选。</small>
                 </div>
-                <button id="bulkMoveButton" class="secondary-button" type="button" disabled>换成此标的</button>
-                <button id="bulkCopyButton" class="secondary-button" type="button" disabled>复制为此标的</button>
-              </div>
+                <div class="bulk-action-stack">
+                  <button id="bulkMoveButton" class="secondary-button bulk-primary-action" type="button" disabled>换成此标的</button>
+                  <button id="bulkCopyButton" class="secondary-button" type="button" disabled>复制为此标的</button>
+                </div>
+              </section>
+
+              <section id="bulkMaturityPanel" class="bulk-edit-panel is-hidden" aria-label="批量修改期限">
+                <div class="field-grid two bulk-maturity-mode">
+                  <label class="field"><span>期限类型</span><select id="bulkMaturityMode">
+                    <option value="sliding">Sliding tenor</option>
+                    <option value="fixed">Fixed date</option>
+                  </select></label>
+                  <label id="bulkSlidingMaturityField" class="field"><span>Target tenor</span><select id="bulkSlidingMaturity"></select></label>
+                </div>
+                <label id="bulkFixedMaturityField" class="field is-hidden"><span>Target date</span><input id="bulkFixedMaturity" type="date" /></label>
+                <small id="bulkMaturityHelp">只修改 IV / Forward 的 maturity；Spot 与 RV 没有 option tenor，不参与修改。Listed expiry 暂不支持批量修改。</small>
+                <div class="bulk-action-stack">
+                  <button id="bulkMaturityMoveButton" class="secondary-button bulk-primary-action" type="button" disabled>换成此期限</button>
+                  <button id="bulkMaturityCopyButton" class="secondary-button" type="button" disabled>复制为此期限</button>
+                </div>
+              </section>
+
               <p id="bulkNote" class="bulk-note"></p>
             </div>
             <div id="savedIndicators" class="saved-indicators"><p class="empty-list-copy">尚未添加指标。</p></div>

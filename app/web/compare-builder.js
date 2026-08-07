@@ -33,6 +33,7 @@
     bulkMode: false,
     bulkSelection: new Set(),
     bulkInstrumentCode: null,
+    bulkEditMode: "underlying",
   };
 
   // A sliding range is re-derived from today every time the workspace or a board opens,
@@ -172,6 +173,13 @@
     on("bulkInstrumentCode", "input", clearBulkInstrumentSelection);
     on("bulkInstrumentCode", "keydown", handleBulkInstrumentKeydown);
     on("bulkInstrumentResults", "click", handleBulkInstrumentResultClick);
+    on("bulkUnderlyingTab", "click", () => setBulkEditMode("underlying"));
+    on("bulkMaturityTab", "click", () => setBulkEditMode("maturity"));
+    on("bulkMaturityMode", "change", renderBulkMaturityControls);
+    on("bulkSlidingMaturity", "change", syncBulkMaturityButtons);
+    on("bulkFixedMaturity", "change", syncBulkMaturityButtons);
+    on("bulkMaturityMoveButton", "click", () => applyBulkMaturity({ copy: false }));
+    on("bulkMaturityCopyButton", "click", () => applyBulkMaturity({ copy: true }));
     on("addChartButton", "click", addChartLane);
     on("indicatorCharts", "click", handleChartStackClick);
     on("savedIndicators", "change", handleSavedIndicatorChange);
@@ -1080,6 +1088,7 @@
     indicatorState.bulkMode = on ?? !indicatorState.bulkMode;
     indicatorState.bulkSelection = new Set();
     indicatorState.bulkInstrumentCode = null;
+    indicatorState.bulkEditMode = "underlying";
     hideIndicatorFormError();
     setBulkNote("");
     const bulkInput = $("bulkInstrumentCode");
@@ -1087,7 +1096,9 @@
     hideBulkInstrumentResults();
     $("bulkBar").classList.toggle("is-hidden", !indicatorState.bulkMode);
     $("bulkModeButton").classList.toggle("is-on", indicatorState.bulkMode);
+    setBulkEditMode("underlying");
     syncBulkInstrumentButtons();
+    renderBulkMaturityControls();
     renderSavedIndicators();
   }
 
@@ -1129,6 +1140,7 @@
       ? `已选 ${indicatorState.bulkSelection.size} 项（含运算指标带入的 ${pulled} 个操作数，共 ${targets.size} 项）`
       : `已选 ${targets.size} 项`;
     syncBulkInstrumentButtons();
+    renderBulkMaturityControls();
   }
 
   function setBulkNote(message, tone = "") {
@@ -1244,6 +1256,214 @@
     if (!box) return;
     box.classList.add("is-hidden");
     box.innerHTML = "";
+  }
+
+  function setBulkEditMode(mode) {
+    indicatorState.bulkEditMode = mode === "maturity" ? "maturity" : "underlying";
+    const maturity = indicatorState.bulkEditMode === "maturity";
+    $("bulkUnderlyingPanel")?.classList.toggle("is-hidden", maturity);
+    $("bulkMaturityPanel")?.classList.toggle("is-hidden", !maturity);
+    $("bulkUnderlyingTab")?.classList.toggle("is-active", !maturity);
+    $("bulkMaturityTab")?.classList.toggle("is-active", maturity);
+    setBulkNote("");
+    if (maturity) renderBulkMaturityControls();
+  }
+
+  function bulkMaturityTargetIds() {
+    const selected = new Set();
+    for (const id of indicatorState.bulkSelection) {
+      const item = itemById(id);
+      if (!item) continue;
+      if (item.type === "derived" || item.type === "implied_vol" || item.type === "forward") {
+        selected.add(item.id);
+      }
+    }
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const item of indicatorState.items) {
+        if (item.type !== "derived" || !selected.has(item.id)) continue;
+        for (const reference of [item.config.operandA, item.config.operandB]) {
+          const operand = itemById(reference);
+          if (operand && !selected.has(operand.id)) {
+            selected.add(operand.id);
+            grew = true;
+          }
+        }
+      }
+    }
+    return selected;
+  }
+
+  function bulkMaturityItems() {
+    const ids = bulkMaturityTargetIds();
+    return indicatorState.items.filter(
+      (item) => ids.has(item.id) && (item.type === "implied_vol" || item.type === "forward"),
+    );
+  }
+
+  function bulkMaturitySupportedTenors(items) {
+    const hasDelta = items.some(
+      (item) => item.type === "implied_vol" && item.config.strikeKind === "delta",
+    );
+    return hasDelta
+      ? state.capabilities?.deltaMaturities || []
+      : state.capabilities?.slidingMaturities || [];
+  }
+
+  function renderBulkMaturityControls() {
+    const mode = $("bulkMaturityMode")?.value === "fixed" ? "fixed" : "sliding";
+    $("bulkSlidingMaturityField")?.classList.toggle("is-hidden", mode !== "sliding");
+    $("bulkFixedMaturityField")?.classList.toggle("is-hidden", mode !== "fixed");
+
+    const items = bulkMaturityItems();
+    const select = $("bulkSlidingMaturity");
+    if (select && mode === "sliding") {
+      const values = bulkMaturitySupportedTenors(items);
+      const current = select.value;
+      select.innerHTML = values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
+      const preferred = values.includes(current)
+        ? current
+        : values.includes("3M")
+          ? "3M"
+          : values[0] || "";
+      select.value = preferred;
+    }
+
+    const help = $("bulkMaturityHelp");
+    if (help) {
+      const ignored = [...indicatorState.bulkSelection]
+        .map(itemById)
+        .filter((item) => item && (item.type === "spot" || item.type === "realized_vol")).length;
+      const suffix = ignored ? ` 另有 ${ignored} 个直接选中的 Spot/RV 没有 option tenor，会忽略。` : "";
+      help.textContent = `将修改 ${items.length} 个 IV / Forward。Sliding 与 Fixed date 支持批量；Listed expiry 暂不支持。${suffix}`;
+    }
+    syncBulkMaturityButtons();
+  }
+
+  function syncBulkMaturityButtons() {
+    const items = bulkMaturityItems();
+    const mode = $("bulkMaturityMode")?.value === "fixed" ? "fixed" : "sliding";
+    const value = mode === "sliding"
+      ? $("bulkSlidingMaturity")?.value || ""
+      : $("bulkFixedMaturity")?.value || "";
+    const enabled = items.length > 0 && Boolean(value);
+    if ($("bulkMaturityMoveButton")) $("bulkMaturityMoveButton").disabled = !enabled;
+    if ($("bulkMaturityCopyButton")) $("bulkMaturityCopyButton").disabled = !enabled;
+  }
+
+  function bulkMaturityCompatibility(items, mode, value) {
+    if (!items.length) return "所选项里没有 IV 或 Forward 可以修改期限。";
+    const listed = items.filter((item) => item.config.maturityMode === "listed");
+    if (listed.length) {
+      return `有 ${listed.length} 个指标使用 Listed expiry；Listed 暂不支持批量修改期限，请先单独编辑。`;
+    }
+    if (mode === "fixed") {
+      if (!validIsoDate(value)) return "请选择合法的 Fixed maturity date。";
+      const delta = items.filter(
+        (item) => item.type === "implied_vol" && item.config.strikeKind === "delta",
+      );
+      if (delta.length) {
+        return `有 ${delta.length} 个 Delta IV；当前数据契约只支持 Delta + Sliding maturity，不能批量改成 Fixed date。`;
+      }
+      return null;
+    }
+    const supported = bulkMaturitySupportedTenors(items);
+    if (!supported.includes(value)) return `当前所选指标不支持 Sliding tenor ${value || "(空)"}。`;
+    const absolute = items.filter(
+      (item) => item.type === "implied_vol" && item.config.strikeKind === "absolute",
+    );
+    if (absolute.length) {
+      return `有 ${absolute.length} 个 Absolute-strike IV；当前数据契约不支持 Absolute strike + Sliding maturity。`;
+    }
+    return null;
+  }
+
+  function applyMaturityToItem(item, mode, value) {
+    item.config.maturityMode = mode;
+    if (mode === "sliding") {
+      item.config.slidingMaturity = value;
+      item.config.expiry = "";
+    } else {
+      item.config.expiry = value;
+    }
+    item.status = initialStatus(item.type);
+    item.response = null;
+    item.request = null;
+    item.error = null;
+  }
+
+  function applyBulkMaturity({ copy }) {
+    hideIndicatorFormError();
+    const mode = $("bulkMaturityMode")?.value === "fixed" ? "fixed" : "sliding";
+    const value = mode === "sliding"
+      ? $("bulkSlidingMaturity")?.value || ""
+      : $("bulkFixedMaturity")?.value || "";
+    const items = bulkMaturityItems();
+    const problem = bulkMaturityCompatibility(items, mode, value);
+    if (problem) return setBulkNote(problem, "is-error");
+
+    const outcome = copy
+      ? bulkCopyMaturity(mode, value)
+      : bulkMoveMaturity(items, mode, value);
+    persistWorkspace();
+    refreshWorkspacePanels();
+    fetchMissingDependencies();
+    renderBulkMaturityControls();
+    setBulkNote(outcome);
+  }
+
+  function bulkMoveMaturity(items, mode, value) {
+    const renamed = items.filter((item) => indicatorAlias(item)).length;
+    for (const item of items) applyMaturityToItem(item, mode, value);
+    const notes = [`已把 ${items.length} 个 IV / Forward 换成 ${value}。`];
+    if (renamed) notes.push(`其中 ${renamed} 个保留了原有别名，如不再合适请双击列头改名。`);
+    notes.push(...duplicateWarning(items));
+    return notes.join("");
+  }
+
+  function bulkCopyMaturity(mode, value) {
+    const targetIds = bulkMaturityTargetIds();
+    const targets = indicatorState.items.filter((item) => targetIds.has(item.id));
+    const maturityIds = new Set(
+      targets
+        .filter((item) => item.type === "implied_vol" || item.type === "forward")
+        .map((item) => item.id),
+    );
+    const idMap = new Map();
+    const copies = targets.map((source) => {
+      const copy = {
+        id: indicatorState.nextId++,
+        type: source.type,
+        config: structuredClone(source.config),
+        active: source.active,
+        status: initialStatus(source.type),
+        response: null,
+        request: null,
+        error: null,
+      };
+      copy.config.alias = "";
+      if (maturityIds.has(source.id)) applyMaturityToItem(copy, mode, value);
+      idMap.set(source.id, copy.id);
+      return copy;
+    });
+    for (const copy of copies) {
+      if (copy.type !== "derived") continue;
+      for (const key of ["operandA", "operandB"]) {
+        const mapped = idMap.get(Number(copy.config[key]));
+        if (mapped !== undefined) copy.config[key] = mapped;
+      }
+    }
+    indicatorState.items.push(...copies);
+    const maturityCount = copies.filter(
+      (copy) => copy.type === "implied_vol" || copy.type === "forward",
+    ).length;
+    const derivedCount = copies.filter((copy) => copy.type === "derived").length;
+    const notes = [
+      `已复制 ${copies.length} 个指标，其中 ${maturityCount} 个 IV / Forward 改为 ${value}${derivedCount ? `，${derivedCount} 个运算指标已接到复制出的操作数` : ""}。`,
+    ];
+    notes.push(...duplicateWarning(copies));
+    return notes.join("");
   }
 
   // What identifies an indicator as a series: not its name, and not which lane it sits in.
