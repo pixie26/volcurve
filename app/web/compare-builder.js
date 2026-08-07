@@ -137,8 +137,20 @@
     };
   }
 
+  // Binding is one long sequence, so a single missing element used to throw and silently
+  // abandon every binding after it — the date controls, the boards, the workspace restore.
+  // The symptom looks nothing like the cause, so bind defensively and say what is missing.
+  function on(id, event, handler) {
+    const element = $(id);
+    if (!element) {
+      console.warn(`volcurve: 找不到 #${id}，该控件未绑定（页面与脚本版本可能不一致，请强制刷新）。`);
+      return;
+    }
+    element.addEventListener(event, handler);
+  }
+
   function initIndicatorBuilder() {
-    $("indicatorType").addEventListener("change", (event) => {
+    on("indicatorType", "change", (event) => {
       const next = defaultDraft(event.target.value);
       next.instrumentCode = indicatorState.draft.instrumentCode;
       next.chartLane = indicatorState.draft.chartLane;
@@ -147,30 +159,26 @@
       renderScopeFields();
       renderIndicatorConfig();
     });
-    $("addIndicatorButton").addEventListener("click", submitIndicator);
-    $("cancelEditButton").addEventListener("click", cancelEditing);
-    $("refreshIndicatorsButton").addEventListener("click", () => refreshActiveIndicators());
-    $("forceRefreshIndicatorsButton").addEventListener("click", forceRefreshActiveIndicators);
-    $("bulkModeButton").addEventListener("click", () => toggleBulkMode());
-    $("bulkMoveButton").addEventListener("click", () => applyBulkInstrument({ copy: false }));
-    $("bulkCopyButton").addEventListener("click", () => applyBulkInstrument({ copy: true }));
-    $("bulkBar").addEventListener("click", handleBulkBarClick);
-    $("addChartButton").addEventListener("click", addChartLane);
-    $("indicatorCharts").addEventListener("click", handleChartStackClick);
-    $("savedIndicators").addEventListener("change", handleSavedIndicatorChange);
-    $("savedIndicators").addEventListener("click", handleSavedIndicatorClick);
-    $("detailIndicatorSelect").addEventListener("change", (event) => {
+    on("addIndicatorButton", "click", submitIndicator);
+    on("cancelEditButton", "click", cancelEditing);
+    on("refreshIndicatorsButton", "click", () => refreshActiveIndicators());
+    on("forceRefreshIndicatorsButton", "click", forceRefreshActiveIndicators);
+    on("bulkModeButton", "click", () => toggleBulkMode());
+    on("bulkMoveButton", "click", () => applyBulkInstrument({ copy: false }));
+    on("bulkCopyButton", "click", () => applyBulkInstrument({ copy: true }));
+    on("bulkBar", "click", handleBulkBarClick);
+    on("addChartButton", "click", addChartLane);
+    on("indicatorCharts", "click", handleChartStackClick);
+    on("savedIndicators", "change", handleSavedIndicatorChange);
+    on("savedIndicators", "click", handleSavedIndicatorClick);
+    on("detailIndicatorSelect", "change", (event) => {
       indicatorState.selectedDetailId = Number(event.target.value);
       persistWorkspace();
       renderIndicatorDetails();
     });
     for (const id of ["startDate", "endDate"]) {
-      $(id).addEventListener("change", invalidateIndicators);
+      on(id, "change", invalidateIndicators);
     }
-    bindDateModeControls();
-    bindScopeFields();
-    bindBoardControls();
-    bindStatsColumnControls();
     document.querySelectorAll('input[name="queryKind"]').forEach((input) => {
       input.addEventListener("change", syncWorkspaceMode);
     });
@@ -182,16 +190,24 @@
         refreshActiveIndicators();
       }
     });
-    restoreStatsColumns();
-    restoreBoards();
-    restoreWorkspace();
-    syncSlidingRange();
-    renderDateMode();
-    syncWorkspaceMode();
-    renderIndicatorConfig();
-    renderBuilderMode();
-    renderStatsColumnConfig();
-    renderBoards();
+    // Each step is isolated: losing one must not cost you the date range, the boards and
+    // the saved workspace as well.
+    const steps = [
+      ["日期模式", bindDateModeControls], ["标的与坐标", bindScopeFields],
+      ["boards", bindBoardControls], ["统计列", bindStatsColumnControls],
+      ["统计列配置", restoreStatsColumns], ["boards 读取", restoreBoards],
+      ["工作区读取", restoreWorkspace], ["日期范围", syncSlidingRange],
+      ["日期模式渲染", renderDateMode], ["模式切换", syncWorkspaceMode],
+      ["指标表单", renderIndicatorConfig], ["编辑状态", renderBuilderMode],
+      ["统计列渲染", renderStatsColumnConfig], ["boards 渲染", renderBoards],
+    ];
+    for (const [name, step] of steps) {
+      try {
+        step();
+      } catch (error) {
+        console.error(`volcurve: 「${name}」初始化失败`, error);
+      }
+    }
   }
 
   function bindDateModeControls() {

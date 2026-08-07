@@ -44,7 +44,28 @@ app.include_router(health_router)
 app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 
 
+def _asset_version() -> str:
+    """A token that changes whenever any served front-end file changes.
+
+    The static mount hands out ETag/Last-Modified, so browsers happily keep a script or
+    stylesheet cached while fetching fresh HTML. A page assembled from two different
+    versions breaks in ways that look like ordinary bugs — a handler binds against an
+    element the other file has not grown yet, and everything after it in that binding pass
+    silently never runs. Stamping the URLs makes each version a distinct resource.
+    """
+    newest = 0.0
+    for name in ("index.html", "app.js", "compare-builder.js", "styles.css"):
+        path = WEB_ROOT / name
+        if path.exists():
+            newest = max(newest, path.stat().st_mtime)
+    return f"{app.version}-{int(newest)}"
+
+
 @app.get("/", include_in_schema=False)
 def web_app() -> HTMLResponse:
     """Serve the Phase D single-page research workspace."""
-    return HTMLResponse((WEB_ROOT / "index.html").read_text(encoding="utf-8"))
+    html = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+    html = html.replace("{{ASSET_VERSION}}", _asset_version())
+    # The HTML is the only thing that carries the current version, so it must never be the
+    # stale half of the pair.
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache, must-revalidate"})

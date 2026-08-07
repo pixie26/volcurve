@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi.testclient import TestClient
 
 from app.domain.disclosures import DISCLOSURES
@@ -23,7 +25,7 @@ def test_web_workspace_and_offline_assets_are_served():
     assert "Compare 用于一个精确坐标" in html
     assert "未复权" in html
     assert 'src="/static/vendor/plotly-5.24.1.min.js"' in html
-    assert 'src="/static/compare-builder.js"' in html
+    assert 'src="/static/compare-builder.js?v=' in html
     assert 'id="indicatorCharts"' in html
     assert 'id="savedIndicators"' in html
     assert "https://" not in html
@@ -627,3 +629,32 @@ def test_copying_a_combination_to_another_underlying_rewires_it_to_the_copies():
     # A move keeps the card's own name but says so, since the name may no longer fit.
     assert "保留了原有别名" in move
     assert "item.response = null" in move
+
+
+def test_the_page_can_never_be_assembled_from_mismatched_asset_versions():
+    """A stale script beside fresh markup breaks in ways that look like ordinary bugs."""
+    with TestClient(app) as client:
+        page = client.get("/")
+        html = page.content.decode("utf-8")
+
+    # The static mount hands out ETag/Last-Modified, so a browser will happily keep a script
+    # cached. Stamping the URL makes each version a distinct resource instead.
+    stamped = re.findall(r'/static/(app\.js|compare-builder\.js|styles\.css)\?v=([^"]+)', html)
+    assert {name for name, _ in stamped} == {"app.js", "compare-builder.js", "styles.css"}
+    assert len({version for _, version in stamped}) == 1, "all assets must carry one version"
+    assert "{{ASSET_VERSION}}" not in html, "the placeholder must be substituted"
+
+    # The HTML is the only thing carrying the current version, so it must always revalidate.
+    assert "no-cache" in page.headers.get("cache-control", "")
+
+
+def test_one_missing_control_does_not_disable_the_rest_of_the_page():
+    with TestClient(app) as client:
+        javascript = client.get("/static/compare-builder.js").text
+
+    # Binding used to be an unguarded sequence: a null element threw and silently abandoned
+    # every binding after it, so a missing button cost you the date range and the boards too.
+    assert "function on(id, event, handler)" in javascript
+    init = javascript.split("function initIndicatorBuilder", 1)[1].split("function bindDateModeControls", 1)[0]
+    assert "$(" not in init, "every binding in init must go through the guarded helper"
+    assert "console.error(`volcurve: 「${name}」初始化失败`" in init
