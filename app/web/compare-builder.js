@@ -22,6 +22,7 @@
     boards: [],
     nextBoardId: 1,
     activeBoardId: null,
+    pendingBoardLoad: null,
     statsColumns: [],
     columnWidths: {},
     dateMode: "sliding",
@@ -359,6 +360,9 @@
     } catch (error) {
       showIndicatorFormError(`浏览器无法保存 indicators：${error.message}`);
     }
+    // Every mutation routes through here, so this is where the board's unsaved marker
+    // is kept honest.
+    renderBoardState();
   }
 
   function serializeItem(item) {
@@ -438,12 +442,68 @@
     $("boardSelect").addEventListener("change", () => {
       const board = boardById($("boardSelect").value);
       $("boardName").value = board ? board.name : "";
+      indicatorState.pendingBoardLoad = null;
+      hideBoardStatus();
       renderBoardActions();
     });
   }
 
   function boardById(id) {
     return indicatorState.boards.find((board) => String(board.id) === String(id)) || null;
+  }
+
+  // Compares the working set against the board it came from. Keys are sorted so a config
+  // rebuilt in a different property order does not read as a change, and a sliding board's
+  // dates are excluded because they are derived from today rather than chosen.
+  function boardSignature(snapshot) {
+    const sliding = snapshot.dateMode === "sliding";
+    return stableStringify({
+      dateMode: snapshot.dateMode,
+      slidingWindow: sliding ? snapshot.slidingWindow : null,
+      startDate: sliding ? null : snapshot.startDate,
+      endDate: sliding ? null : snapshot.endDate,
+      chartCount: snapshot.chartCount,
+      columnWidths: snapshot.columnWidths || {},
+      items: (snapshot.items || []).map((item) => ({
+        id: item.id, type: item.type, active: item.active, config: item.config,
+      })),
+    });
+  }
+
+  function stableStringify(value) {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+  }
+
+  function boardIsDirty() {
+    const board = boardById(indicatorState.activeBoardId);
+    if (!board) return false;
+    return boardSignature(currentBoardSnapshot(board.name)) !== boardSignature(board);
+  }
+
+  // Loading a board discards whatever is on screen, so warn when that would lose work:
+  // either an edited board, or a working set that was never saved as one.
+  function openingBoardWouldDiscardWork() {
+    return boardIsDirty()
+      || (indicatorState.activeBoardId === null && indicatorState.items.length > 0);
+  }
+
+  function renderBoardState() {
+    if (!$("boardDirtyMark")) return;
+    const board = boardById(indicatorState.activeBoardId);
+    const dirty = boardIsDirty();
+    $("boardDirtyMark").classList.toggle("is-hidden", !dirty);
+    $("boardUnsavedNote").classList.toggle("is-hidden", !dirty);
+    $("updateBoardButton").classList.toggle("is-emphasised", dirty);
+    $("boardMenuSummary").title = board
+      ? `当前 board：${board.name}${dirty ? " · 有未保存的修改" : ""}`
+      : "尚未保存为 board";
+    $("activeBoardLabel").textContent = board
+      ? `当前 board：${board.name}（保存于 ${board.savedAt.slice(0, 10) || "—"}）${dirty ? " · 有未保存的修改" : ""}`
+      : "当前工作区尚未保存为 board。";
   }
 
   function currentBoardSnapshot(name) {
@@ -512,6 +572,15 @@
     hideIndicatorFormError();
     const board = boardById(id);
     if (!board) return showBoardStatus("请先在下拉框中选择一个 board。");
+    // Require a second click when loading would throw away unsaved work.
+    if (openingBoardWouldDiscardWork() && String(indicatorState.pendingBoardLoad) !== String(board.id)) {
+      indicatorState.pendingBoardLoad = board.id;
+      const active = boardById(indicatorState.activeBoardId);
+      return showBoardStatus(active
+        ? `「${active.name}」有未保存的修改，载入会丢弃它们。先点「更新当前 board」保存，或再点一次「载入」确认。`
+        : "当前工作区还没有保存为 board，载入会覆盖它。先点「另存为新 board」保存，或再点一次「载入」确认。");
+    }
+    indicatorState.pendingBoardLoad = null;
     indicatorState.dateMode = board.dateMode;
     indicatorState.slidingWindow = board.slidingWindow;
     if (board.startDate) $("startDate").value = board.startDate;
@@ -559,10 +628,7 @@
     const active = boardById(indicatorState.activeBoardId);
     if (active && !$("boardName").value.trim()) $("boardName").value = active.name;
     $("boardCount").textContent = String(indicatorState.boards.length);
-    $("boardMenuSummary").title = active ? `当前 board：${active.name}` : "尚未保存为 board";
-    $("activeBoardLabel").textContent = active
-      ? `当前 board：${active.name}（保存于 ${active.savedAt.slice(0, 10) || "—"}）`
-      : "当前工作区尚未保存为 board。";
+    renderBoardState();
     renderBoardActions();
   }
 

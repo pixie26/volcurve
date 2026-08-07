@@ -358,6 +358,31 @@ def test_boards_reload_saved_indicator_sets_with_fresh_data():
     assert "indicatorState.columnWidths = { ...board.columnWidths }" in javascript
 
 
+def test_unsaved_board_changes_are_flagged_before_they_can_be_lost():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'id="boardDirtyMark"' in html
+    assert 'id="boardUnsavedNote"' in html
+
+    signature = javascript.split("function boardSignature", 1)[1].split("function stableStringify", 1)[0]
+    # A sliding board's dates come from today, so they must not read as an edit.
+    assert 'startDate: sliding ? null : snapshot.startDate' in signature
+    assert 'slidingWindow: sliding ? snapshot.slidingWindow : null' in signature
+    assert "columnWidths" in signature and "chartCount" in signature
+    # Key order must not matter: a config rebuilt in another order is not a change.
+    assert "Object.keys(value).sort()" in javascript
+
+    # Loading over unsaved work needs a second, deliberate click.
+    assert "function openingBoardWouldDiscardWork" in javascript
+    assert "indicatorState.pendingBoardLoad = board.id" in javascript
+    assert "再点一次「载入」确认" in javascript
+    # Every mutation persists, so that is where the marker is refreshed.
+    persist = javascript.split("function persistWorkspace", 1)[1].split("function serializeItem", 1)[0]
+    assert "renderBoardState()" in persist
+
+
 def test_statistics_table_is_transposed_with_resizable_columns():
     with TestClient(app) as client:
         html = client.get("/").text

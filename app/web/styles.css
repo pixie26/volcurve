@@ -38,6 +38,10 @@ button { color: inherit; }
 .board-menu { position: relative; }
 .board-menu summary::-webkit-details-marker { display: none; }
 .board-menu summary span { padding: 1px 5px; color: var(--ink); background: var(--lime); border-radius: 999px; font-size: 9px; font-weight: 800; }
+.board-menu summary span.board-dirty-mark { padding: 0; color: #f0b45a; background: transparent; font-size: 11px; }
+/* Outranks the generic `.board-menu-popover > p` rule so the warning reads as a warning. */
+.board-menu-popover > p.board-unsaved-note { color: #77400e; background: var(--orange-soft); border-color: #edc494; }
+.board-menu-actions .secondary-button.is-emphasised { color: #fff; background: var(--green); border-color: var(--green); }
 .board-menu-popover { position: absolute; left: 0; top: calc(100% + 8px); z-index: 30; width: 320px; padding: 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
 .board-menu-popover > p { margin: 0 0 10px; padding: 8px 10px; color: var(--green-dark); background: #eef7f1; border: 1px solid #bedac9; border-radius: 8px; font-size: 10px; line-height: 1.45; }
 .board-name-field { display: grid; gap: 5px; }

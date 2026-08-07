@@ -22,9 +22,10 @@
         <select id="boardSelect" aria-label="已保存 board"></select>
         <button id="loadBoardButton" class="board-bar-button" type="button" disabled>载入</button>
         <details class="board-menu">
-          <summary id="boardMenuSummary" aria-label="Board 管理">Boards <span id="boardCount">0</span></summary>
+          <summary id="boardMenuSummary" aria-label="Board 管理">Boards <span id="boardCount">0</span><span id="boardDirtyMark" class="board-dirty-mark is-hidden" title="有未保存的修改">●</span></summary>
           <div class="board-menu-popover">
             <p id="activeBoardLabel">当前工作区尚未保存为 board。</p>
+            <p id="boardUnsavedNote" class="board-unsaved-note is-hidden">当前改动还没有写回这个 board。点「更新当前 board」保存，或用「另存为新 board」另开一个。</p>
             <label class="board-name-field"><span>Board 名称</span><input id="boardName" type="text" maxlength="60" autocomplete="off" placeholder="例如 QQQ 期限结构监控" /></label>
             <div class="board-menu-actions">
               <button id="saveBoardAsButton" class="secondary-button" type="button">另存为新 board</button>
