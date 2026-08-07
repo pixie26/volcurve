@@ -179,6 +179,28 @@ def test_hovering_one_chart_reads_out_every_chart_for_that_date():
     assert "HOVER DATE" in readout
 
 
+def test_hover_draws_the_same_vertical_guide_line_on_every_chart():
+    with TestClient(app) as client:
+        javascript = client.get("/static/compare-builder.js").text
+
+    # Spikes snap to the observation date so every lane's line sits on one vertical.
+    assert 'spikesnap: "data"' in javascript
+    assert 'spikedash: "dot"' in javascript
+    assert 'spikemode: "across"' in javascript
+
+    sync = javascript.split("function syncHover", 1)[1].split("function axisTimestamp", 1)[0]
+    # Plotly only renders spike lines for the numeric {xval} form of Fx.hover.
+    assert "Plotly.Fx.hover(div, { xval }, laneSubplot(div))" in sync
+    assert "pointNumber" not in sync
+    # The re-entrancy guard must not outlive the synchronous fan-out, otherwise a
+    # source unhover cancels the hover that immediately follows it.
+    assert "setTimeout" not in sync
+    assert "finally" in sync
+
+    lane_subplot = javascript.split("function laneSubplot", 1)[1].split("\n  }", 1)[0]
+    assert '"xy" : "xy2"' in lane_subplot
+
+
 def test_query_rail_asks_for_dates_then_underlying_then_indicator_once():
     with TestClient(app) as client:
         html = client.get("/").text
