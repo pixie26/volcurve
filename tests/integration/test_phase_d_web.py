@@ -208,12 +208,32 @@ def test_query_rail_asks_for_dates_then_underlying_then_indicator_once():
 
     assert html.index("1 · 日期范围") < html.index("2 · Underlying 与坐标") < html.index("3 · Indicator builder")
     # A single underlying input drives both the surface query and every new indicator.
-    assert html.count('list="instrumentOptions"') == 1
+    assert html.count('id="instrumentCode"') == 1
     assert 'data-draft="instrumentCode"' in html
     assert 'id="draftChartLane"' in html
     assert 'data-draft="chartLane"' in html
     assert "indicatorPlacementFields" not in javascript
     assert "renderScopeFields" in javascript
+
+
+def test_instrument_search_results_are_clickable_not_a_datalist():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/app.js").text
+
+    # A datalist filters options against the typed text, so searching "9998" would hide a
+    # match whose code is "HK_9998". Results are rendered as an explicit list instead.
+    # Other datalists stay: for RV windows and tenors the typed text really is the value.
+    assert 'id="instrumentOptions"' not in html
+    assert 'list="instrumentOptions"' not in html
+    assert 'id="instrumentResults"' in html
+
+    assert "function renderInstrumentResults" in javascript
+    assert "data-instrument-code" in javascript
+    select = javascript.split("function selectInstrument", 1)[1].split("\n}", 1)[0]
+    # Picking a result must look exactly like a manual edit to every other listener.
+    assert 'input.dispatchEvent(new Event("input", { bubbles: true }))' in select
+    assert 'input.dispatchEvent(new Event("change", { bubbles: true }))' in select
 
 
 def test_saved_indicators_can_be_combined_with_arithmetic_operators():

@@ -117,6 +117,24 @@ function bindEvents() {
   $("instrumentCode").addEventListener("input", resetContractDiscovery);
   $("endDate").addEventListener("change", resetContractDiscovery);
   $("instrumentSearchButton").addEventListener("click", searchInstruments);
+  $("instrumentCode").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      // The field sits inside the query form; searching must not submit it.
+      event.preventDefault();
+      searchInstruments();
+    } else if (event.key === "Escape") {
+      hideInstrumentResults();
+    }
+  });
+  $("instrumentResults").addEventListener("click", (event) => {
+    const choice = event.target.closest("[data-instrument-code]");
+    if (choice) selectInstrument(choice.dataset.instrumentCode);
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#instrumentResults, #instrumentCode, #instrumentSearchButton")) {
+      hideInstrumentResults();
+    }
+  });
   $("snapshotDate").addEventListener("change", renderSurfaceSnapshot);
   $("csvButton").addEventListener("click", downloadCsv);
   document.querySelectorAll('input[name="queryKind"]').forEach((input) => {
@@ -829,6 +847,10 @@ function renderDisclosureEntries(container, entries) {
   </article>`).join("");
 }
 
+// Results are rendered as an explicit clickable list rather than a <datalist>: browsers
+// filter datalist options against the typed text, so searching "9998" would hide a match
+// whose code is "HK_9998", and options injected after the field has focus are not always
+// re-read. An explicit list always shows exactly what the catalogue returned.
 async function searchInstruments() {
   const query = $("instrumentCode").value.trim();
   $("instrumentHelp").textContent = "正在搜索 instrument catalogue…";
@@ -836,13 +858,47 @@ async function searchInstruments() {
     const endpoint = `${state.capabilities.endpoints.instruments}?q=${encodeURIComponent(query)}&type=equity&maxResults=50`;
     const response = await apiFetch(endpoint);
     const data = await response.json();
-    $("instrumentOptions").innerHTML = data.instruments.map((item) => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.companyName || item.bbgCode || item.type || "")}</option>`).join("");
+    renderInstrumentResults(data.instruments || []);
     $("instrumentHelp").textContent = data.hasMore
-      ? `匹配 ${data.matchedCount} 项，仅显示前 ${data.returnedCount} 项；请缩小关键词。`
-      : `匹配 ${data.matchedCount} 项。可展开输入框建议并选择 instrument code。`;
+      ? `匹配 ${data.matchedCount} 项，仅显示前 ${data.returnedCount} 项；请缩小关键词后重新搜索。`
+      : `匹配 ${data.matchedCount} 项；点击下方结果即可选用。`;
   } catch (error) {
+    hideInstrumentResults();
     $("instrumentHelp").textContent = `搜索失败：${error.payload?.message || error.message}`;
   }
+}
+
+function renderInstrumentResults(instruments) {
+  const box = $("instrumentResults");
+  if (!instruments.length) {
+    box.innerHTML = '<p class="instrument-empty">没有匹配的 instrument。</p>';
+    box.classList.remove("is-hidden");
+    return;
+  }
+  box.innerHTML = instruments.map((item) => {
+    const meta = [item.type, item.marketName, item.currencyCode].filter(Boolean).join(" · ");
+    return `<button type="button" class="instrument-result" role="option" data-instrument-code="${escapeHtml(item.code)}">
+      <strong>${escapeHtml(item.code)}</strong>
+      <span>${escapeHtml(item.companyName || item.bbgCode || "")}</span>
+      ${meta ? `<em>${escapeHtml(meta)}</em>` : ""}
+    </button>`;
+  }).join("");
+  box.classList.remove("is-hidden");
+}
+
+function hideInstrumentResults() {
+  $("instrumentResults").classList.add("is-hidden");
+  $("instrumentResults").innerHTML = "";
+}
+
+function selectInstrument(code) {
+  const input = $("instrumentCode");
+  input.value = code;
+  // Everything downstream listens on the input, so replay the events a manual edit fires.
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  hideInstrumentResults();
+  $("instrumentHelp").textContent = `已选择 ${code}。`;
 }
 
 async function downloadCsv() {

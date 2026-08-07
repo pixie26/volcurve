@@ -84,6 +84,15 @@ button { color: inherit; }
 .field small, .form-section > small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .input-action { display: grid; grid-template-columns: 1fr 38px; gap: 6px; }
 .icon-button { height: 38px; border: 1px solid #cbd3c8; border-radius: 8px; background: var(--panel); cursor: pointer; font-size: 20px; }
+/* Rendered in flow rather than absolutely positioned so the scrolling rail cannot clip it. */
+.instrument-results { max-height: 230px; overflow-y: auto; margin-top: 6px; background: var(--panel); border: 1px solid #bedac9; border-radius: 9px; }
+.instrument-result { display: block; width: 100%; padding: 8px 10px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #eceee8; cursor: pointer; }
+.instrument-result:last-child { border-bottom: 0; }
+.instrument-result:hover, .instrument-result:focus-visible { background: var(--mint); outline: none; }
+.instrument-result strong { display: block; font-size: 11px; }
+.instrument-result span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+.instrument-result em { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; font-style: normal; }
+.instrument-empty { margin: 0; padding: 10px; text-align: center; color: var(--muted); font-size: 10px; }
 .coordinate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
 .config-first { margin-top: 10px; }
 .config-grid { margin-top: 10px; }

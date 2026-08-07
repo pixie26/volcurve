@@ -78,11 +78,11 @@
             <label id="underlyingField" class="field field-wide">
               <span>Underlying · instrument code</span>
               <div class="input-action">
-                <input id="instrumentCode" name="instrumentCode" data-draft="instrumentCode" value="US_QQQ" list="instrumentOptions" autocomplete="off" />
+                <input id="instrumentCode" name="instrumentCode" data-draft="instrumentCode" value="US_QQQ" autocomplete="off" />
                 <button id="instrumentSearchButton" class="icon-button" type="button" title="搜索标的">⌕</button>
               </div>
-              <datalist id="instrumentOptions"></datalist>
-              <small id="instrumentHelp">这里是唯一的标的输入口：新 indicator 直接使用它，已保存 indicator 保留自己的标的。当前 catalogue 仅 equity。</small>
+              <div id="instrumentResults" class="instrument-results is-hidden" role="listbox" aria-label="搜索结果"></div>
+              <small id="instrumentHelp">输入代码或名称后按 Enter 或点 ⌕ 搜索，再从结果里点选。新 indicator 直接使用此标的；已保存 indicator 保留自己的标的。当前 catalogue 仅 equity。</small>
             </label>
             <label id="chartLaneField" class="field field-wide">
               <span>放到哪个坐标</span>
