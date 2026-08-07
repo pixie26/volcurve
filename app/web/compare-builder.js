@@ -23,7 +23,13 @@
     nextBoardId: 1,
     activeBoardId: null,
     statsColumns: [],
+    columnWidths: {},
   };
+
+  const STATS_LABEL_COLUMN = "__label__";
+  const DEFAULT_LABEL_WIDTH = 190;
+  const DEFAULT_SERIES_WIDTH = 150;
+  const MIN_COLUMN_WIDTH = 80;
 
   const TYPE_LABELS = {
     implied_vol: "Implied volatility",
@@ -169,7 +175,7 @@
       }
     }
     $("chartLaneField").classList.toggle("is-hidden", !compare);
-    $("boardSection").classList.toggle("is-hidden", !compare);
+    $("boardBar").classList.toggle("is-hidden", !compare);
     $("underlyingField").classList.toggle("is-hidden", compare && indicatorState.draft.type === "derived");
   }
 
@@ -232,6 +238,7 @@
       indicatorState.selectedDetailId = indicatorState.items.some((item) => item.id === selectedId) ? selectedId : null;
       const boardId = Number(stored.activeBoardId);
       indicatorState.activeBoardId = indicatorState.boards.some((board) => board.id === boardId) ? boardId : null;
+      indicatorState.columnWidths = normalizeColumnWidths(stored.columnWidths);
       indicatorState.restorePending = indicatorState.items.some((item) => item.active);
     } catch (error) {
       showIndicatorFormError(`无法读取浏览器中保存的 indicators：${error.message}`);
@@ -264,6 +271,7 @@
         selectedDetailId: indicatorState.selectedDetailId,
         activeBoardId: indicatorState.activeBoardId,
         chartCount: indicatorState.chartCount,
+        columnWidths: indicatorState.columnWidths,
         items: indicatorState.items.map(serializeItem),
       }));
     } catch (error) {
@@ -291,6 +299,7 @@
           startDate: validIsoDate(board.startDate) ? board.startDate : "",
           endDate: validIsoDate(board.endDate) ? board.endDate : "",
           chartCount: clampLaneCount(board.chartCount),
+          columnWidths: normalizeColumnWidths(board.columnWidths),
           items: normalizeBoardItems(board.items),
         }];
       });
@@ -313,6 +322,16 @@
   function clampLaneCount(value) {
     const count = Number(value);
     return Number.isInteger(count) ? Math.min(MAX_CHARTS, Math.max(1, count)) : 1;
+  }
+
+  function normalizeColumnWidths(raw) {
+    const widths = {};
+    if (!raw || typeof raw !== "object") return widths;
+    for (const [key, value] of Object.entries(raw)) {
+      const width = Number(value);
+      if (Number.isFinite(width) && width >= MIN_COLUMN_WIDTH) widths[key] = Math.round(width);
+    }
+    return widths;
   }
 
   function persistBoards() {
@@ -346,15 +365,27 @@
       startDate: $("startDate").value,
       endDate: $("endDate").value,
       chartCount: indicatorState.chartCount,
+      columnWidths: { ...indicatorState.columnWidths },
       items: indicatorState.items.map((item) => structuredClone(serializeItem(item))),
     };
   }
 
+  // Board feedback stays inside the board menu so it is visible where the click happened.
+  function showBoardStatus(message) {
+    $("boardStatus").textContent = message;
+    $("boardStatus").classList.remove("is-hidden");
+  }
+
+  function hideBoardStatus() {
+    $("boardStatus").classList.add("is-hidden");
+    $("boardStatus").textContent = "";
+  }
+
   function saveBoardAs() {
-    hideIndicatorFormError();
+    hideBoardStatus();
     const name = $("boardName").value.trim();
-    if (!name) return showIndicatorFormError("请先给这个 board 起一个名字。");
-    if (!indicatorState.items.length) return showIndicatorFormError("当前没有 indicator，board 会是空的。");
+    if (!name) return showBoardStatus("请先给这个 board 起一个名字。");
+    if (!indicatorState.items.length) return showBoardStatus("当前没有 indicator，board 会是空的。");
     const board = { id: indicatorState.nextBoardId++, ...currentBoardSnapshot(name) };
     indicatorState.boards.push(board);
     indicatorState.activeBoardId = board.id;
@@ -364,18 +395,19 @@
   }
 
   function updateActiveBoard() {
-    hideIndicatorFormError();
+    hideBoardStatus();
     const board = boardById(indicatorState.activeBoardId);
-    if (!board) return showIndicatorFormError("当前没有打开的 board；请先用「另存为」创建一个。");
+    if (!board) return showBoardStatus("当前没有打开的 board；请先用「另存为」创建一个。");
     Object.assign(board, currentBoardSnapshot($("boardName").value.trim() || board.name));
     persistBoards();
     renderBoards();
+    showBoardStatus(`已更新「${board.name}」。`);
   }
 
   function deleteActiveBoard() {
-    hideIndicatorFormError();
+    hideBoardStatus();
     const board = boardById($("boardSelect").value);
-    if (!board) return showIndicatorFormError("请先在下拉框中选择要删除的 board。");
+    if (!board) return showBoardStatus("请先在下拉框中选择要删除的 board。");
     indicatorState.boards = indicatorState.boards.filter((candidate) => candidate.id !== board.id);
     if (indicatorState.activeBoardId === board.id) indicatorState.activeBoardId = null;
     persistBoards();
@@ -386,9 +418,10 @@
   // Opening a board restores the configuration and then re-requests every active
   // indicator, so a board always shows current data rather than a frozen snapshot.
   function openBoard(id) {
+    hideBoardStatus();
     hideIndicatorFormError();
     const board = boardById(id);
-    if (!board) return showIndicatorFormError("请先在下拉框中选择一个 board。");
+    if (!board) return showBoardStatus("请先在下拉框中选择一个 board。");
     if (board.startDate) $("startDate").value = board.startDate;
     if (board.endDate) $("endDate").value = board.endDate;
     indicatorState.items = board.items.map((item) => ({
@@ -409,6 +442,7 @@
     indicatorState.editingId = null;
     indicatorState.hoverDate = null;
     indicatorState.draft.chartLane = "1";
+    indicatorState.columnWidths = { ...board.columnWidths };
     persistWorkspace();
     renderBoards();
     renderScopeFields();
@@ -429,6 +463,7 @@
     const active = boardById(indicatorState.activeBoardId);
     if (active && !$("boardName").value.trim()) $("boardName").value = active.name;
     $("boardCount").textContent = String(indicatorState.boards.length);
+    $("boardMenuSummary").title = active ? `当前 board：${active.name}` : "尚未保存为 board";
     $("activeBoardLabel").textContent = active
       ? `当前 board：${active.name}（保存于 ${active.savedAt.slice(0, 10) || "—"}）`
       : "当前工作区尚未保存为 board。";
@@ -448,23 +483,23 @@
     let html = "";
     if (draft.type === "implied_vol") {
       html = `${requestSystemFields(draft)}${maturityModeField(draft)}${maturityValueField(draft)}${strikeFields(draft)}${listedDiscoveryPanel(draft)}`;
-      $("indicatorBuilderNote").textContent = "IV 使用精确 maturity + strike 坐标。Vol convention 与 layout 都是 BNP 请求字段；缺失值不会换成邻近坐标。";
+      $("indicatorBuilderNote").textContent = "IV 使用精确 maturity + strike 坐标。Vol convention 与 layout 都是数据源请求字段；缺失值不会换成邻近坐标。";
     } else if (draft.type === "realized_vol") {
       html = `${requestSystemFields(draft)}<div class="field-grid two config-grid">
         <label class="field"><span>Window · sessions</span><input data-draft="rvWindow" type="number" min="2" step="1" list="rvWindowOptions" value="${escapeHtml(draft.rvWindow)}" /></label>
         <label class="field"><span>Alignment</span><select data-draft="rvAlignment"><option value="trailing" ${draft.rvAlignment === "trailing" ? "selected" : ""}>Trailing</option><option value="forward" ${draft.rvAlignment === "forward" ? "selected" : ""}>Forward</option></select></label>
       </div>`;
-      $("indicatorBuilderNote").textContent = "RV 接受任意 ≥2 的整数窗口，不取最近档位。Spot 来自 BNP IV 响应，因此独立 RV 会明确使用 3M K/F 100% 作为取数载体；该坐标不进入 RV 公式。";
+      $("indicatorBuilderNote").textContent = "RV 接受任意 ≥2 的整数窗口，不取最近档位。Spot 来自数据源 IV 响应，因此独立 RV 会明确使用 3M K/F 100% 作为取数载体；该坐标不进入 RV 公式。";
     } else if (draft.type === "spot") {
-      html = `${requestSystemFields(draft)}<div class="system-default-card"><strong>无需额外参数</strong><span>BNP 原始未复权 spot / price-return source</span></div>`;
+      html = `${requestSystemFields(draft)}<div class="system-default-card"><strong>无需额外参数</strong><span>原始未复权 spot / price-return source</span></div>`;
       $("indicatorBuilderNote").textContent = "当前 Cortex 数据路径把 spot 放在 IV response 内；系统用 3M K/F 100% 请求承载 spot，并在指标卡中明示。不会把该参考 IV 当作用户选择的指标。";
     } else if (draft.type === "derived") {
       ensureDerivedDefaults(draft);
       html = derivedOperandFields(draft);
-      $("indicatorBuilderNote").textContent = "运算在浏览器内按共同观察日逐日进行，不发送新的 BNP 请求。任一操作数缺失该日期或该日期无有效值时，结果保持为空，不插值、不前向填充；除数为 0 同样保持为空。";
+      $("indicatorBuilderNote").textContent = "运算在浏览器内按共同观察日逐日进行，不发送新的取数请求。任一操作数缺失该日期或该日期无有效值时，结果保持为空，不插值、不前向填充；除数为 0 同样保持为空。";
     } else {
       html = `${requestSystemFields(draft)}${maturityModeField(draft)}${maturityValueField(draft)}${listedDiscoveryPanel(draft)}`;
-      $("indicatorBuilderNote").textContent = "Forward 按所选 maturity 读取 BNP forward curve；系统用 K/F 100% 作为响应载体。该 moneyness 不改变同一期限的 forward 值。";
+      $("indicatorBuilderNote").textContent = "Forward 按所选 maturity 读取数据源 forward curve；系统用 K/F 100% 作为响应载体。该 moneyness 不改变同一期限的 forward 值。";
     }
     config.innerHTML = html;
     bindDraftFields();
@@ -532,8 +567,8 @@
 
   function requestSystemFields(draft) {
     return `<div class="field-grid two config-grid request-system-fields">
-      <label class="field"><span>Vol convention</span><select data-draft="volatilityConvention"><option value="bsVol" ${draft.volatilityConvention === "bsVol" ? "selected" : ""}>bsVol</option><option value="bnppVol" ${draft.volatilityConvention === "bnppVol" ? "selected" : ""}>bnppVol</option></select><small>BNP 字段；通常只有 bsVol 可用。</small></label>
-      <label class="field"><span>Layout</span><select data-draft="layout"><option value="matrix" ${draft.layout === "matrix" ? "selected" : ""}>Matrix</option><option value="vector" ${draft.layout === "vector" ? "selected" : ""}>Vector</option></select><small>BNP 返回结构；数值语义不变。</small></label>
+      <label class="field"><span>Vol convention</span><select data-draft="volatilityConvention"><option value="bsVol" ${draft.volatilityConvention === "bsVol" ? "selected" : ""}>bsVol</option><option value="bnppVol" ${draft.volatilityConvention === "bnppVol" ? "selected" : ""}>bnppVol</option></select><small>数据源字段；通常只有 bsVol 可用。</small></label>
+      <label class="field"><span>Layout</span><select data-draft="layout"><option value="matrix" ${draft.layout === "matrix" ? "selected" : ""}>Matrix</option><option value="vector" ${draft.layout === "vector" ? "selected" : ""}>Vector</option></select><small>数据源返回结构；数值语义不变。</small></label>
     </div>`;
   }
 
@@ -550,7 +585,7 @@
       const maturities = draft.strikeKind === "delta"
         ? state.capabilities?.deltaMaturities || []
         : state.capabilities?.slidingMaturities || [];
-      return `<label class="field field-wide"><span>Sliding maturity</span><input data-draft="slidingMaturity" value="${escapeHtml(draft.slidingMaturity)}" list="indicatorMaturityOptions" autocomplete="off" /><datalist id="indicatorMaturityOptions">${optionList(maturities)}</datalist><small>可键盘输入，但必须是 BNP OpenAPI 列出的 tenor；不支持的值会在本地明确拒绝。</small></label>`;
+      return `<label class="field field-wide"><span>Sliding maturity</span><input data-draft="slidingMaturity" value="${escapeHtml(draft.slidingMaturity)}" list="indicatorMaturityOptions" autocomplete="off" /><datalist id="indicatorMaturityOptions">${optionList(maturities)}</datalist><small>可键盘输入，但必须是数据源 OpenAPI 列出的 tenor；不支持的值会在本地明确拒绝。</small></label>`;
     }
     const typeLabel = draft.maturityMode === "listed" ? "Listed expiry" : "Fixed maturity date";
     return `<label class="field field-wide"><span>${typeLabel}</span><input data-draft="expiry" type="date" value="${escapeHtml(draft.expiry)}" /><small>允许手输任意合法日期；精确点不存在时保持缺失，不改成最近日期。</small></label>`;
@@ -571,11 +606,11 @@
         <label class="field"><span>Relative to</span><select data-draft="moneynessBasis"><option value="relative_to_forward" ${draft.moneynessBasis === "relative_to_forward" ? "selected" : ""}>Forward · K/F</option><option value="relative_to_spot_ref" ${draft.moneynessBasis === "relative_to_spot_ref" ? "selected" : ""}>Spot reference · K/S</option></select></label>
       </div>`;
     } else if (selectedKind === "delta") {
-      coordinate = `<label class="field field-wide"><span>Put / Call delta</span><input data-draft="delta" value="${escapeHtml(draft.delta)}" list="indicatorDeltaOptions" autocomplete="off" /><datalist id="indicatorDeltaOptions">${optionList(state.capabilities?.deltaStrikes || [])}</datalist><small>Delta 只支持 sliding maturity 和 BNP 官方 delta codes。</small></label>`;
+      coordinate = `<label class="field field-wide"><span>Put / Call delta</span><input data-draft="delta" value="${escapeHtml(draft.delta)}" list="indicatorDeltaOptions" autocomplete="off" /><datalist id="indicatorDeltaOptions">${optionList(state.capabilities?.deltaStrikes || [])}</datalist><small>Delta 只支持 sliding maturity 和数据源官方 delta codes。</small></label>`;
     } else {
       coordinate = `<label class="field field-wide"><span>Absolute strike</span><input data-draft="absoluteStrike" type="number" min="0.000001" step="any" value="${escapeHtml(draft.absoluteStrike)}" /><small>允许任意正数；不存在的精确 strike 返回缺失，不自动取 listed 邻近值。</small></label>`;
     }
-    const combinationNote = fixedMaturity ? "" : "<small>BNP API 不支持 Sliding maturity + Absolute strike；系统不会自动把 3M 转成邻近 expiry。</small>";
+    const combinationNote = fixedMaturity ? "" : "<small>数据源 API 不支持 Sliding maturity + Absolute strike；系统不会自动把 3M 转成邻近 expiry。</small>";
     return `<label class="field field-wide"><span>Strike type</span><select data-draft="strikeKind">
       <option value="percentage" ${selectedKind === "percentage" ? "selected" : ""}>Percentage moneyness</option>
       <option value="delta" ${selectedKind === "delta" ? "selected" : ""} ${fixedMaturity ? "disabled" : ""}>Put / Call delta</option>
@@ -611,7 +646,7 @@
     const observationDate = discovery?.date || $("endDate").value || isoDate(new Date());
     let result = "";
     if (discovery?.status === "loading") {
-      result = '<p class="coordinate-discovery-status">正在向 BNP 请求该观察日的 listed surface…</p>';
+      result = '<p class="coordinate-discovery-status">正在向数据源请求该观察日的 listed surface…</p>';
     } else if (discovery?.status === "error") {
       result = `<p class="coordinate-discovery-error">${escapeHtml(discovery.message)}</p>`;
     } else if (discovery?.status === "ready") {
@@ -620,11 +655,11 @@
       result = `<div class="coordinate-grid discovery-selectors">
         <label class="field"><span>Available expiry</span><select id="indicatorAvailableExpiry"><option value="">请选择实际 expiry</option>${expiries}</select></label>
         ${needsStrike ? '<label class="field"><span>Available strike</span><select id="indicatorAvailableStrike" disabled><option value="">先选择 expiry</option></select></label>' : ""}
-      </div><p id="indicatorCoordinateStatus" class="coordinate-discovery-status">BNP 返回 ${discovery.snapshot.maturities.length} 个 expiry；系统没有自动选择。</p>
+      </div><p id="indicatorCoordinateStatus" class="coordinate-discovery-status">数据源返回 ${discovery.snapshot.maturities.length} 个 expiry；系统没有自动选择。</p>
       <button id="applyIndicatorCoordinate" class="secondary-button discovery-apply" type="button" disabled>应用所选 listed 坐标</button>`;
     }
-    return `<section class="coordinate-discovery" aria-label="BNP listed 坐标发现">
-      <div class="coordinate-discovery-heading"><strong>向 BNP 加载实际 listed 坐标</strong><small>手输仍然允许；加载结果只供明确选择，不替代当前输入。</small></div>
+    return `<section class="coordinate-discovery" aria-label="listed 坐标发现">
+      <div class="coordinate-discovery-heading"><strong>加载实际 listed 坐标</strong><small>手输仍然允许；加载结果只供明确选择，不替代当前输入。</small></div>
       <div class="field-grid discovery-loader"><label class="field"><span>Observation date</span><input id="indicatorObservationDate" type="date" value="${escapeHtml(observationDate)}" /></label><button id="loadIndicatorCoordinates" class="secondary-button" type="button" ${discovery?.status === "loading" ? "disabled" : ""}>加载可用坐标</button></div>${result}
     </section>`;
   }
@@ -659,7 +694,7 @@
       });
       const payload = await response.json();
       const snapshot = payload.snapshots.find((item) => item.date === date);
-      if (!snapshot) throw new Error("BNP 在该观察日没有返回 listed surface。");
+      if (!snapshot) throw new Error("数据源在该观察日没有返回 listed surface。");
       indicatorState.discovery = { status: "ready", code, date, snapshot };
     } catch (error) {
       indicatorState.discovery = { status: "error", code, date, message: error.payload?.message || error.message };
@@ -859,7 +894,7 @@
           ? state.capabilities.deltaMaturities
           : state.capabilities.slidingMaturities;
         if (!supported.includes(draft.slidingMaturity)) {
-          throw new Error(`BNP OpenAPI 不接受 sliding maturity ${draft.slidingMaturity || "(空)"}；请输入官方 tenor。`);
+          throw new Error(`数据源 OpenAPI 不接受 sliding maturity ${draft.slidingMaturity || "(空)"}；请输入官方 tenor。`);
         }
       } else if (!validIsoDate(draft.expiry)) {
         throw new Error("请输入合法的 fixed/listed expiry 日期。");
@@ -869,11 +904,11 @@
       if (draft.strikeKind === "percentage") {
         const value = Number(draft.moneyness);
         if (!state.capabilities.moneynessLevels.some((level) => Number(level) === value)) {
-          throw new Error(`BNP OpenAPI 不接受 moneyness ${draft.moneyness || "(空)"}；请输入官方离散档位。`);
+          throw new Error(`数据源 OpenAPI 不接受 moneyness ${draft.moneyness || "(空)"}；请输入官方离散档位。`);
         }
       } else if (draft.strikeKind === "delta") {
         if (draft.maturityMode !== "sliding" || !state.capabilities.deltaStrikes.includes(draft.delta)) {
-          throw new Error("Delta 只接受 sliding maturity 与 BNP 官方 delta code。");
+          throw new Error("Delta 只接受 sliding maturity 与数据源官方 delta code。");
         }
       } else if (!(Number(draft.absoluteStrike) > 0)) {
         throw new Error("Absolute strike 必须是正数。");
@@ -1226,11 +1261,11 @@
   function indicatorDetail(item) {
     const wire = `${item.config.volatilityConvention} · ${item.config.layout}`;
     const placement = `坐标 ${item.config.chartLane}`;
-    if (item.type === "derived") return `${placement} · 浏览器本地按共同观察日计算 · 不发送新的 BNP 请求`;
+    if (item.type === "derived") return `${placement} · 浏览器本地按共同观察日计算 · 不发送新的取数请求`;
     if (item.type === "realized_vol") return `${placement} · price-return RV · spot via reference 3M K/F 100% · ${wire} carrier`;
-    if (item.type === "spot") return `${placement} · BNP spot · 未复权 · reference 3M K/F 100% · ${wire} carrier`;
-    if (item.type === "forward") return `${placement} · BNP forward curve · K/F 100% response carrier · ${wire}`;
-    return `${placement} · BNP ${wire} · exact coordinate · no substitution`;
+    if (item.type === "spot") return `${placement} · 数据源 spot · 未复权 · reference 3M K/F 100% · ${wire} carrier`;
+    if (item.type === "forward") return `${placement} · 数据源 forward curve · K/F 100% response carrier · ${wire}`;
+    return `${placement} · ${wire} · exact coordinate · no substitution`;
   }
 
   function indicatorStatus(item) {
@@ -1649,6 +1684,66 @@
       renderStatsColumnConfig();
       renderIndicatorStats();
     });
+    $("statsWidthResetButton").addEventListener("click", () => {
+      indicatorState.columnWidths = {};
+      persistWorkspace();
+      renderIndicatorStats();
+    });
+    $("indicatorStatsHead").addEventListener("pointerdown", startColumnResize);
+  }
+
+  // Dragging a header divider resizes that column. Widths live in the workspace and are
+  // copied into a board when it is saved, so a board restores its own layout.
+  function startColumnResize(event) {
+    const handle = event.target.closest("[data-resize-key]");
+    if (!handle) return;
+    event.preventDefault();
+    const key = handle.dataset.resizeKey;
+    const column = document.querySelector(`#indicatorStatsCols col[data-column-key="${CSS.escape(key)}"]`);
+    const headerCell = handle.closest("th");
+    if (!column || !headerCell) return;
+    const startX = event.clientX;
+    // Measure the header cell: a <col> does not report a usable box of its own.
+    const startWidth = headerCell.getBoundingClientRect().width;
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add("is-resizing-column");
+
+    const move = (moveEvent) => {
+      const width = Math.max(MIN_COLUMN_WIDTH, Math.round(startWidth + moveEvent.clientX - startX));
+      indicatorState.columnWidths[key] = width;
+      column.style.width = `${width}px`;
+      applyStatsTableWidth();
+    };
+    const finish = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      document.body.classList.remove("is-resizing-column");
+      persistWorkspace();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  }
+
+  function columnWidth(key, fallback) {
+    return indicatorState.columnWidths[key] || fallback;
+  }
+
+  // Columns the user has never dragged spread out to fill the panel; a dragged column
+  // has its own stored width and keeps it exactly.
+  function autoSeriesWidth(count, labelWidth) {
+    const container = $("indicatorStatsTable")?.parentElement?.clientWidth || 0;
+    if (!count || !container) return DEFAULT_SERIES_WIDTH;
+    return Math.max(DEFAULT_SERIES_WIDTH, Math.floor((container - labelWidth - 2) / count));
+  }
+
+  function applyStatsTableWidth() {
+    const table = $("indicatorStatsTable");
+    if (!table) return;
+    const total = Array.from(document.querySelectorAll("#indicatorStatsCols col"))
+      .reduce((sum, column) => sum + (Number.parseFloat(column.style.width) || 0), 0);
+    table.style.width = total > 0 ? `${total}px` : "";
   }
 
   function renderStatsColumnConfig() {
@@ -1666,35 +1761,59 @@
       </div>`;
     }).join("");
     const shown = indicatorState.statsColumns.filter((entry) => entry.visible).length;
-    $("statsColumnSummary").textContent = `列设置 · ${shown}/${indicatorState.statsColumns.length}`;
+    $("statsColumnSummary").textContent = `统计项设置 · ${shown}/${indicatorState.statsColumns.length}`;
   }
 
+  // The table is transposed: one column per indicator, one row per statistic. With two
+  // dozen statistics that reads far better than a very wide row per indicator.
   function renderIndicatorStats() {
     const body = $("indicatorStatsBody");
     if (!body) return;
-    const columns = visibleStatsColumns();
-    const headers = ["Indicator", ...columns.map((column) => column.label)];
-    $("indicatorStatsHead").innerHTML = `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
+    const rows = visibleStatsColumns();
     const active = indicatorState.items.filter((item) => item.active);
-    const rows = active.map((item) => {
+    const series = active.map((item) => {
       const entry = indicatorState.seriesIndex.get(item.id);
-      const stats = summarizeSeries(entry?.points);
-      const name = `<td class="stats-name">${escapeHtml(indicatorLabel(item))}</td>`;
-      if (!stats) {
-        const message = escapeHtml(entry?.error || "当前范围内没有有效值");
-        return `<tr>${name}<td colspan="${Math.max(columns.length, 1)}" class="cell-missing">${message}</td></tr>`;
-      }
-      return `<tr>${name}${columns.map((column) => statCell(column, item, stats)).join("")}</tr>`;
+      return { item, stats: summarizeSeries(entry?.points), error: entry?.error || null };
     });
-    body.innerHTML = rows.join("") || `<tr><td colspan="${headers.length}" class="cell-missing">没有启用中的 indicator。</td></tr>`;
-    $("indicatorStatsCount").textContent = `${active.length} series`;
+
+    const labelWidth = columnWidth(STATS_LABEL_COLUMN, DEFAULT_LABEL_WIDTH);
+    $("indicatorStatsCols").innerHTML = [
+      `<col data-column-key="${STATS_LABEL_COLUMN}" style="width:${labelWidth}px" />`,
+      ...series.map(({ item }) => `<col data-column-key="${item.id}" style="width:${columnWidth(String(item.id), autoSeriesWidth(series.length, labelWidth))}px" />`),
+    ].join("");
+    applyStatsTableWidth();
+
+    $("indicatorStatsHead").innerHTML = `<tr>
+      <th class="stats-label-cell">统计项${resizeHandle(STATS_LABEL_COLUMN)}</th>
+      ${series.map(({ item, stats, error }) => `<th class="stats-series-head">
+        <span class="stats-series-name" title="${escapeHtml(indicatorLabel(item))}">${escapeHtml(indicatorLabel(item))}</span>
+        ${stats ? "" : `<small class="stats-series-note">${escapeHtml(error || "当前范围内没有有效值")}</small>`}
+        ${resizeHandle(String(item.id))}
+      </th>`).join("")}
+    </tr>`;
+
+    if (!series.length) {
+      body.innerHTML = '<tr><td class="cell-missing">没有启用中的 indicator。</td></tr>';
+      $("indicatorStatsCount").textContent = "0 series";
+      return;
+    }
+    body.innerHTML = rows.map((column) => `<tr>
+      <th scope="row" class="stats-label-cell">${escapeHtml(column.label)}</th>
+      ${series.map(({ item, stats }) => statCell(column, item, stats)).join("")}
+    </tr>`).join("");
+    $("indicatorStatsCount").textContent = `${series.length} series`;
+  }
+
+  function resizeHandle(key) {
+    return `<span class="column-resizer" data-resize-key="${escapeHtml(key)}" role="separator" aria-label="调整列宽"></span>`;
   }
 
   function statCell(column, item, stats) {
+    if (!stats) return '<td class="cell-missing">—</td>';
     if (column.id === "lane") return `<td>坐标 ${escapeHtml(item.config.chartLane)}</td>`;
     const value = stats[column.id];
     if (column.kind === "text") return `<td>${escapeHtml(value ?? "—")}</td>`;
-    if (column.kind === "count") return `<td>${escapeHtml(formatNumber(value, 0))}</td>`;
+    if (column.kind === "count") return `<td class="stat-number">${escapeHtml(formatNumber(value, 0))}</td>`;
     if (column.kind === "percentile") {
       if (value === null || value === undefined) return '<td class="cell-missing">—</td>';
       return `<td class="pct-cell ${percentileBucket(value)}">${escapeHtml(formatFixed(value, 1))}%</td>`;

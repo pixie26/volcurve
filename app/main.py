@@ -20,7 +20,7 @@ from app.api.vol_surface import router as surface_router
 app = FastAPI(
     title="Cortex Vol Analytics",
     version="0.4.0",
-    description="Internal volatility analytics backed by BNP Cortex DataHub.",
+    description="Internal volatility analytics backed by Cortex DataHub.",
 )
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"

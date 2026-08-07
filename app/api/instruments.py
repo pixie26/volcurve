@@ -68,7 +68,7 @@ def instruments(
                 if fetch_result.cache_status == "fixture"
                 else "已使用 instrument catalogue 缓存。"
                 if fetch_result.cache_status == "hit"
-                else "BNP instrument catalogue 请求已完成。"
+                else "Instrument catalogue 请求已完成。"
             ),
         ),
         ActivityEvent(

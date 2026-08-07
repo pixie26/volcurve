@@ -104,7 +104,7 @@ def capability_payload() -> dict:
         },
         "rvAlignments": ["trailing", "forward"],
         "volatilityUnits": "percent_at_api_boundary",
-        "priceSource": "BNP Cortex spot",
+        "priceSource": "Cortex spot",
         "priceAdjustment": "unadjusted",
         "returnType": "price_return",
         "corporateActionSource": None,

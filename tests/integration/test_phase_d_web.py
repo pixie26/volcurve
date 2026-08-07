@@ -105,9 +105,9 @@ def test_compare_manual_coordinates_distinguish_schema_rejection_from_missing_da
     with TestClient(app) as client:
         javascript = client.get("/static/compare-builder.js").text
 
-    assert "BNP OpenAPI 不接受 sliding maturity" in javascript
-    assert "BNP OpenAPI 不接受 moneyness" in javascript
-    assert "BNP API 不支持 Sliding maturity + Absolute strike" in javascript
+    assert "数据源 OpenAPI 不接受 sliding maturity" in javascript
+    assert "数据源 OpenAPI 不接受 moneyness" in javascript
+    assert "数据源 API 不支持 Sliding maturity + Absolute strike" in javascript
     assert "允许手输任意合法日期" in javascript
     assert "不存在的精确 strike 返回缺失" in javascript
     assert "加载可用坐标" in javascript
@@ -256,6 +256,34 @@ def test_saved_indicators_can_be_edited_and_duplicated():
     assert "运算指标不能引用自己" in javascript
 
 
+def test_provider_name_is_not_shown_in_the_interface():
+    """Everything the browser renders stays vendor-neutral; only wire values keep bnpp."""
+    with TestClient(app) as client:
+        pages = {
+            "index": client.get("/").text,
+            "app.js": client.get("/static/app.js").text,
+            "compare-builder.js": client.get("/static/compare-builder.js").text,
+            "capabilities": client.get("/api/v1/capabilities").text,
+        }
+    for name, body in pages.items():
+        assert "BNP" not in body, name
+
+    # The lowercase wire enum and the credential env vars are unaffected.
+    assert '"bnpp"' in pages["compare-builder.js"]
+    assert "code_type" in pages["app.js"]
+
+
+def test_boards_live_in_the_topbar_not_the_query_rail():
+    with TestClient(app) as client:
+        html = client.get("/").text
+
+    header = html.split("<header", 1)[1].split("</header>", 1)[0]
+    rail = html.split('class="query-rail"', 1)[1].split("</aside>", 1)[0]
+    for element in ("boardSelect", "boardName", "saveBoardAsButton", "loadBoardButton"):
+        assert f'id="{element}"' in header, element
+        assert f'id="{element}"' not in rail, element
+
+
 def test_boards_reload_saved_indicator_sets_with_fresh_data():
     with TestClient(app) as client:
         html = client.get("/").text
@@ -271,9 +299,34 @@ def test_boards_reload_saved_indicator_sets_with_fresh_data():
     assert "refreshActiveIndicators()" in open_board
     assert 'status: item.type === "derived" ? "ready" : "stale"' in open_board
     assert "response: null" in open_board
-    snapshot = javascript.split("function currentBoardSnapshot", 1)[1].split("function saveBoardAs", 1)[0]
+    snapshot = javascript.split("function currentBoardSnapshot", 1)[1].split("// Board feedback", 1)[0]
     assert "serializeItem" in snapshot
     assert "startDate" in snapshot and "chartCount" in snapshot
+    # Column widths travel with the board, so reopening one restores its table layout.
+    assert "columnWidths: { ...indicatorState.columnWidths }" in snapshot
+    assert "indicatorState.columnWidths = { ...board.columnWidths }" in javascript
+
+
+def test_statistics_table_is_transposed_with_resizable_columns():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'id="indicatorStatsCols"' in html
+    assert 'id="indicatorStatsTable"' in html
+    assert "每列是一个 indicator，每行是一个统计项" in html
+
+    render = javascript.split("function renderIndicatorStats", 1)[1].split("function resizeHandle", 1)[0]
+    # Body rows are statistics; each series contributes a column.
+    assert "rows.map((column)" in render
+    assert "series.map(({ item, stats }) => statCell(column, item, stats))" in render
+    assert "applyStatsTableWidth()" in render
+
+    resize = javascript.split("function startColumnResize", 1)[1].split("function columnWidth", 1)[0]
+    assert "MIN_COLUMN_WIDTH" in resize
+    # The <col> has no usable box of its own, so the header cell is measured instead.
+    assert "headerCell.getBoundingClientRect().width" in resize
+    assert "persistWorkspace()" in resize
 
 
 def test_statistics_columns_are_configurable_and_cover_the_full_metric_set():

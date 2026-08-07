@@ -32,7 +32,7 @@ STRIKE_RULE_LABELS = {
 }
 
 SPOT_NOTE = (
-    "Spot 为 BNP Cortex 原始未复权价格；RV 是 price-return RV，未做分红或公司行动调整。"
+    "Spot 为数据源原始未复权价格；RV 是 price-return RV，未做分红或公司行动调整。"
     "大幅跳变只标记 RETURN_OUTLIER，不代表已确认公司行动。"
 )
 
@@ -157,7 +157,7 @@ def build_quality_contract(
     warning = None
     events: list[ActivityEvent] = []
     if invalid_count:
-        warning = f"BNP 返回 {invalid_count} 个无效 IV 观测；原值已保留，这些点已从统计计算中排除。"
+        warning = f"数据源返回 {invalid_count} 个无效 IV 观测；原值已保留，这些点已从统计计算中排除。"
         events.append(
             ActivityEvent(
                 code="INVALID_POINTS_EXCLUDED",

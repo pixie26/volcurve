@@ -15,8 +15,28 @@
     <header class="topbar">
       <a class="brand" href="/" aria-label="Volcurve 首页">
         <span class="brand-mark">V</span>
-        <span><strong>VOLCURVE</strong><small>CORTEX VOLATILITY LAB</small></span>
+        <span><strong>VOLCURVE</strong><small>VOLATILITY LAB</small></span>
       </a>
+
+      <div id="boardBar" class="board-bar">
+        <select id="boardSelect" aria-label="已保存 board"></select>
+        <button id="loadBoardButton" class="board-bar-button" type="button" disabled>载入</button>
+        <details class="board-menu">
+          <summary id="boardMenuSummary" aria-label="Board 管理">Boards <span id="boardCount">0</span></summary>
+          <div class="board-menu-popover">
+            <p id="activeBoardLabel">当前工作区尚未保存为 board。</p>
+            <label class="board-name-field"><span>Board 名称</span><input id="boardName" type="text" maxlength="60" autocomplete="off" placeholder="例如 QQQ 期限结构监控" /></label>
+            <div class="board-menu-actions">
+              <button id="saveBoardAsButton" class="secondary-button" type="button">另存为新 board</button>
+              <button id="updateBoardButton" class="secondary-button" type="button" disabled>更新当前 board</button>
+              <button id="deleteBoardButton" class="secondary-button board-danger" type="button" disabled>删除所选</button>
+            </div>
+            <p id="boardStatus" class="board-status is-hidden" role="alert"></p>
+            <small>Board 保存 indicator 配置、坐标布局、日期范围与统计表列宽，不保存行情。载入时会按保存的日期范围重新取数，因此拿到的是最新数据。</small>
+          </div>
+        </details>
+      </div>
+
       <div class="topbar-meta">
         <span id="apiVersion" class="api-version">API —</span>
         <span id="healthStatus" class="status-pill status-neutral"><i></i>检查连接中</span>
@@ -37,22 +57,6 @@
             <label><input type="radio" name="queryKind" value="surface" /><span>Surface</span></label>
           </fieldset>
 
-          <section id="boardSection" class="form-section board-section">
-            <div class="section-heading-row"><h2>Boards</h2><span id="boardCount" class="mini-badge">0</span></div>
-            <p id="activeBoardLabel" class="board-active-label">当前工作区尚未保存为 board。</p>
-            <div class="field-grid board-load-row">
-              <label class="field"><span>已保存 board</span><select id="boardSelect"></select></label>
-              <button id="loadBoardButton" class="secondary-button" type="button" disabled>载入</button>
-            </div>
-            <label class="field field-wide"><span>Board 名称</span><input id="boardName" type="text" maxlength="60" autocomplete="off" placeholder="例如 QQQ 期限结构监控" /></label>
-            <div class="board-actions">
-              <button id="saveBoardAsButton" class="secondary-button" type="button">另存为新 board</button>
-              <button id="updateBoardButton" class="secondary-button" type="button" disabled>更新当前 board</button>
-              <button id="deleteBoardButton" class="secondary-button board-danger" type="button" disabled>删除所选</button>
-            </div>
-            <small>Board 保存 indicator 配置、坐标布局与日期范围，不保存行情。载入时会按保存的日期范围重新向 BNP 取数，因此拿到的是最新数据。</small>
-          </section>
-
           <section class="form-section">
             <div class="section-heading-row"><h2>1 · 日期范围</h2><span class="step-badge">全局</span></div>
             <div class="field-grid two">
@@ -65,7 +69,7 @@
           <section class="form-section">
             <div class="section-heading-row"><h2>2 · Underlying 与坐标</h2><span class="step-badge">新指标</span></div>
             <label id="underlyingField" class="field field-wide">
-              <span>Underlying · BNP instrument code</span>
+              <span>Underlying · instrument code</span>
               <div class="input-action">
                 <input id="instrumentCode" name="instrumentCode" data-draft="instrumentCode" value="US_QQQ" list="instrumentOptions" autocomplete="off" />
                 <button id="instrumentSearchButton" class="icon-button" type="button" title="搜索标的">⌕</button>
@@ -108,7 +112,7 @@
             <h2>IV 坐标</h2>
             <label class="field field-wide"><span>请求模式</span><select id="requestMode"></select></label>
             <div class="field-grid two">
-              <label class="field"><span>Vol convention</span><select id="volConvention"><option value="bsVol">Black-Scholes</option><option value="bnppVol">BNP convention</option></select></label>
+              <label class="field"><span>Vol convention</span><select id="volConvention"><option value="bsVol">Black-Scholes</option><option value="bnppVol">供应商约定</option></select></label>
               <label class="field"><span>Layout</span><select id="layout"><option value="matrix">Matrix</option><option value="vector">Vector</option></select></label>
             </div>
             <div id="maturityRuleRow" class="field-grid two is-hidden">
@@ -162,18 +166,19 @@
               <div><p class="eyebrow">RANGE STATISTICS</p><h3>显示中指标的区间统计</h3></div>
               <div class="stats-heading-actions">
                 <details class="stats-columns">
-                  <summary id="statsColumnSummary">列设置</summary>
+                  <summary id="statsColumnSummary">统计项设置</summary>
                   <div class="stats-columns-popover">
-                    <p>勾选要显示的列，用 ↑ ↓ 调整顺序；设置保存在当前浏览器。</p>
+                    <p>勾选要显示的统计项，用 ↑ ↓ 调整先后顺序；设置保存在当前浏览器。列宽可直接拖动表头分隔线调整，并随 board 一起保存。</p>
                     <div id="statsColumnList" class="stats-column-list"></div>
                     <button id="statsColumnsResetButton" class="secondary-button" type="button">全部显示并恢复默认顺序</button>
+                    <button id="statsWidthResetButton" class="secondary-button" type="button">恢复默认列宽</button>
                   </div>
                 </details>
                 <span id="indicatorStatsCount" class="outline-badge">0 series</span>
               </div>
             </div>
-            <div class="table-scroll"><table><thead id="indicatorStatsHead"></thead><tbody id="indicatorStatsBody"></tbody></table></div>
-            <p class="table-footnote">统计只使用当前日期范围内的有效值：缺失点被跳过，不插值也不前向填充。1D/5D/20D 变化与自相关按有效观测计数，不按日历天。百分位 = 区间内 ≤ 最新值的观测占比；偏度与峰度为样本值（峰度已减 3）。</p>
+            <div class="table-scroll stats-scroll"><table id="indicatorStatsTable" class="stats-table"><colgroup id="indicatorStatsCols"></colgroup><thead id="indicatorStatsHead"></thead><tbody id="indicatorStatsBody"></tbody></table></div>
+            <p class="table-footnote">每列是一个 indicator，每行是一个统计项。统计只使用当前日期范围内的有效值：缺失点被跳过，不插值也不前向填充。1D/5D/20D 变化与自相关按有效观测计数，不按日历天。百分位 = 区间内 ≤ 最新值的观测占比；偏度与峰度为样本值（峰度已减 3）。</p>
           </section>
 
           <section class="panel compare-guidance">

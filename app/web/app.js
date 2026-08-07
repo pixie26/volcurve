@@ -239,7 +239,7 @@ function contractDiscoveryPanel() {
   const observationDate = discovery?.date || $("endDate").value || isoDate(new Date());
   let result = "";
   if (discovery?.status === "loading") {
-    result = '<p class="coordinate-discovery-status">正在向 BNP 请求该观察日的 listed surface…</p>';
+    result = '<p class="coordinate-discovery-status">正在向数据源请求该观察日的 listed surface…</p>';
   } else if (discovery?.status === "error") {
     result = `<p class="coordinate-discovery-error">${escapeHtml(discovery.message)}</p>`;
   } else if (discovery?.status === "ready") {
@@ -254,7 +254,7 @@ function contractDiscoveryPanel() {
     <button id="applyContractCoordinate" class="secondary-button discovery-apply" type="button" disabled>应用所选坐标</button>`;
   }
   return `<section class="coordinate-discovery" aria-label="可用 listed 合约坐标">
-    <div class="coordinate-discovery-heading"><div><strong>可用合约坐标</strong><small>按观察日读取实际 listed expiry/strike；BNP 将此组合命名为 fixed maturity + fixed strike。不会替代当前输入。</small></div></div>
+    <div class="coordinate-discovery-heading"><div><strong>可用合约坐标</strong><small>按观察日读取实际 listed expiry/strike；数据源将此组合命名为 fixed maturity + fixed strike。不会替代当前输入。</small></div></div>
     <div class="field-grid discovery-loader">
       <label class="field"><span>Observation date</span><input id="contractObservationDate" type="date" value="${escapeHtml(observationDate)}" /></label>
       <button id="loadContractCoordinates" class="secondary-button" type="button" ${discovery?.status === "loading" ? "disabled" : ""}>加载可用坐标</button>
@@ -304,7 +304,7 @@ async function loadListedCoordinates() {
     });
     const payload = await response.json();
     const snapshot = payload.snapshots.find((item) => item.date === date);
-    if (!snapshot) throw new Error("BNP 在该观察日没有返回 listed surface。请改用另一个可用市场日期。");
+    if (!snapshot) throw new Error("数据源在该观察日没有返回 listed surface。请改用另一个可用市场日期。");
     state.contractDiscovery = { status: "ready", code, date, snapshot, requestId: payload.requestId };
   } catch (error) {
     state.contractDiscovery = {
@@ -354,7 +354,7 @@ function applyContractCoordinate() {
   $("lowFixedStrike").value = strike;
   if ($("highFixedMaturity")) $("highFixedMaturity").value = expiry;
   if ($("highFixedStrike")) $("highFixedStrike").value = strike;
-  $("contractCoordinateStatus").textContent = `已明确应用 listed expiry ${expiry} / strike ${strike}（BNP fixed+fixed wire mode）。这是用户选择，不是最近坐标替代。`;
+  $("contractCoordinateStatus").textContent = `已明确应用 listed expiry ${expiry} / strike ${strike}（fixed+fixed wire mode）。这是用户选择，不是最近坐标替代。`;
 }
 
 function coordinateSelects(labelOne, keyOne, valuesOne, defaultOne, labelTwo, keyTwo, valuesTwo, defaultTwo, compare) {
@@ -839,7 +839,7 @@ async function searchInstruments() {
     $("instrumentOptions").innerHTML = data.instruments.map((item) => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.companyName || item.bbgCode || item.type || "")}</option>`).join("");
     $("instrumentHelp").textContent = data.hasMore
       ? `匹配 ${data.matchedCount} 项，仅显示前 ${data.returnedCount} 项；请缩小关键词。`
-      : `匹配 ${data.matchedCount} 项。可展开输入框建议并选择 BNP code。`;
+      : `匹配 ${data.matchedCount} 项。可展开输入框建议并选择 instrument code。`;
   } catch (error) {
     $("instrumentHelp").textContent = `搜索失败：${error.payload?.message || error.message}`;
   }

@@ -139,7 +139,7 @@ def _ordered_pair(low, high, *, label: str) -> None:
 
 def _validate_moneyness(value: float) -> float:
     if value not in MONEYNESS_LEVELS:
-        raise ValueError("unsupported BNP moneyness level")
+        raise ValueError("unsupported moneyness level")
     return value
 
 

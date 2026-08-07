@@ -52,7 +52,7 @@ def _source_info(client, request: VolatilityRequest, fetch_results, warmup_from)
     cache_status = statuses[0] if len(statuses) == 1 else "mixed"
     request_ids = list(dict.fromkeys(result.correlation_id for result in fetch_results))
     return SourceInfo(
-        provider="BNP Cortex DataHub",
+        provider="Cortex DataHub",
         apiVersion=client.api_version,
         instrumentCode=request.code,
         retrievedAt=max(result.retrieved_at for result in fetch_results),
@@ -77,7 +77,7 @@ def _fetch_activity(fetch_results) -> list[ActivityEvent]:
             ActivityEvent(
                 code="FIXTURE_LOADED",
                 stage="fetch",
-                message="已加载脱敏离线 fixture；未调用 BNP live API。",
+                message="已加载脱敏离线 fixture；未调用 live API。",
             )
         )
     if "hit" in statuses:
@@ -90,12 +90,12 @@ def _fetch_activity(fetch_results) -> list[ActivityEvent]:
                 ActivityEvent(
                     code="UPSTREAM_FETCH_STARTED",
                     stage="fetch",
-                    message="已向 BNP Cortex 发起数据请求。",
+                    message="已向数据源发起数据请求。",
                 ),
                 ActivityEvent(
                     code="UPSTREAM_FETCH_COMPLETED",
                     stage="fetch",
-                    message="BNP Cortex 数据请求已完成。",
+                    message="数据源数据请求已完成。",
                 ),
             ]
         )
@@ -187,7 +187,7 @@ def build_compare_response(
         annualization=252,
         volUnits="percent",
         spotNote=(
-            "Spot 为 BNP Cortex 原始未复权价格；RV 是 price-return RV，未做分红或公司行动调整。"
+            "Spot 为数据源原始未复权价格；RV 是 price-return RV，未做分红或公司行动调整。"
         ),
         corporateActionAdjustment="none",
     )
@@ -257,7 +257,7 @@ def build_surface_response(
     warning = None
     if invalid_count:
         warning = (
-            f"BNP 返回 {invalid_count} 个无效 IV surface 点；原值已保留，effective IV 已置空。"
+            f"数据源返回 {invalid_count} 个无效 IV surface 点；原值已保留，effective IV 已置空。"
         )
     point_count = sum(len(snapshot.points) for snapshot in snapshots)
     quality = SurfaceQualitySummary(
