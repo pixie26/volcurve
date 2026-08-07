@@ -96,3 +96,18 @@ def volatility_request_hash(request: VolatilityRequest, api_version: str) -> str
     )
     payload = f"implied-volatility|{api_version}|{canonical}".encode()
     return hashlib.sha256(payload).hexdigest()[:32]
+
+
+def volatility_coordinate_hash(request: VolatilityRequest, api_version: str) -> str:
+    """Identify the coordinate itself, independent of the date range.
+
+    Two requests sharing this hash differ only in the window they ask for, so a stored
+    response for a wider window can answer a narrower one. Everything that changes what a
+    value *means* — instrument, rules, convention, layout, strikes, maturities, and the
+    API version — stays inside the hash.
+    """
+    wire = serialize_volatility_request(request)
+    coordinate = {key: value for key, value in wire.items() if key not in {"startDate", "endDate"}}
+    canonical = json.dumps(coordinate, sort_keys=True, separators=(",", ":"))
+    payload = f"implied-volatility-coordinate|{api_version}|{canonical}".encode()
+    return hashlib.sha256(payload).hexdigest()[:32]

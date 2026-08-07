@@ -563,3 +563,25 @@ def test_statistics_table_summarizes_every_displayed_indicator():
     # Statistics skip missing points instead of filling them in.
     assert "point.value !== null && point.value !== undefined" in summarize
     assert "sorted.filter((value) => value <= latest.value).length / count" in summarize
+
+
+def test_a_narrower_range_is_reused_and_a_force_refresh_can_bypass_it():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    # Asking for a sub-range of something already stored used to force a fresh read purely
+    # by accident; now that it is reused, there has to be a deliberate way past the cache.
+    assert 'id="forceRefreshIndicatorsButton"' in html
+    assert "强制刷新" in html
+    assert "function forceRefreshActiveIndicators" in javascript
+    assert 'refreshActiveIndicators({ force: true })' in javascript
+
+    fetch = javascript.split("async function fetchIndicator", 1)[1].split(
+        "async function refreshActiveIndicators", 1
+    )[0]
+    assert "force ? { ...item.request, forceRefresh: true } : item.request" in fetch
+    # The flag belongs to the one call, not to the indicator that gets saved to a board.
+    assert "forceRefresh" not in javascript.split("function buildIndicatorRequest", 1)[1].split(
+        "function coordinateRequest", 1
+    )[0]

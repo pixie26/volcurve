@@ -145,7 +145,8 @@
     });
     $("addIndicatorButton").addEventListener("click", submitIndicator);
     $("cancelEditButton").addEventListener("click", cancelEditing);
-    $("refreshIndicatorsButton").addEventListener("click", refreshActiveIndicators);
+    $("refreshIndicatorsButton").addEventListener("click", () => refreshActiveIndicators());
+    $("forceRefreshIndicatorsButton").addEventListener("click", forceRefreshActiveIndicators);
     $("addChartButton").addEventListener("click", addChartLane);
     $("indicatorCharts").addEventListener("click", handleChartStackClick);
     $("savedIndicators").addEventListener("change", handleSavedIndicatorChange);
@@ -1158,7 +1159,7 @@
     return { ...base, maturity_rule: config.maturityMode, strike_rule: includeStrikeChoice ? config.moneynessBasis : "relative_to_forward", low_strike: strike, high_strike: strike, low_fixed_maturity: config.expiry, high_fixed_maturity: config.expiry };
   }
 
-  async function fetchIndicator(item) {
+  async function fetchIndicator(item, { force = false } = {}) {
     // No active check here: an inactive indicator is still fetched when an active derived
     // indicator reads it. Callers decide what is needed via itemsNeedingData().
     if (!indicatorState.items.some((candidate) => candidate.id === item.id)) return;
@@ -1173,10 +1174,12 @@
     try {
       validateScope(item.config);
       item.request = buildIndicatorRequest(item);
+      // forceRefresh stays out of item.request: it applies to this one call, not to the
+      // saved shape of the indicator.
       const response = await apiFetch(state.capabilities.endpoints.compare, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(item.request),
+        body: JSON.stringify(force ? { ...item.request, forceRefresh: true } : item.request),
       });
       const payload = await response.json();
       if (!indicatorState.items.some((candidate) => candidate.id === item.id)) return;
@@ -1197,7 +1200,7 @@
     refreshWorkspacePanels();
   }
 
-  async function refreshActiveIndicators() {
+  async function refreshActiveIndicators({ force = false } = {}) {
     hideIndicatorFormError();
     // Catch the day rolling over on a tab that has been open since yesterday.
     if (syncSlidingRange()) {
@@ -1205,8 +1208,15 @@
       persistWorkspace();
     }
     const fetchable = itemsNeedingData().filter((item) => item.type !== "derived");
-    await Promise.all(fetchable.map(fetchIndicator));
+    await Promise.all(fetchable.map((item) => fetchIndicator(item, { force })));
     refreshWorkspacePanels();
+  }
+
+  // A normal refresh is happy to be served from a stored wider range for the same
+  // coordinate, so asking for a different window no longer forces a fresh read. This is
+  // the way to bypass that when upstream has restated history.
+  async function forceRefreshActiveIndicators() {
+    await refreshActiveIndicators({ force: true });
   }
 
   // Being shown and being needed are different things: a switched-off indicator still

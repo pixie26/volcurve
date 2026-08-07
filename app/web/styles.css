@@ -130,6 +130,10 @@ button { color: inherit; }
 .derived-preview { margin: 9px 0 0; padding: 9px 10px; color: var(--green-dark); background: #eef7f1; border: 1px solid #bedac9; border-radius: 8px; font-size: 9px; line-height: 1.5; word-break: break-word; }
 .saved-indicator-heading { margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--line); }
 .text-button { padding: 3px 0; color: var(--green-dark); background: transparent; border: 0; cursor: pointer; font-size: 9px; font-weight: 800; }
+.refresh-actions { display: flex; align-items: center; gap: 9px; }
+.refresh-actions .force-refresh-button { position: relative; padding-left: 9px; color: var(--muted); }
+.refresh-actions .force-refresh-button::before { content: ""; position: absolute; left: 0; top: 50%; width: 1px; height: 10px; margin-top: -5px; background: var(--line); }
+.refresh-actions .force-refresh-button:hover { color: #b4231f; }
 .saved-indicators { display: grid; gap: 7px; margin-top: 10px; }
 .saved-indicator-storage-note { margin: 8px 0 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
 .empty-list-copy { margin: 0; padding: 12px; text-align: center; color: var(--muted); background: rgba(255,255,255,.45); border: 1px dashed #c6cec3; border-radius: 9px; font-size: 10px; }

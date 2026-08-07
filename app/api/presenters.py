@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 
+from app.clients.cortex.errors import CortexError, ErrorCode
 from app.domain.disclosures import DISCLOSURES, LARGE_SURFACE_POINT_WARNING
 from app.domain.observations import QualityFlag
 from app.domain.requests import VolatilityRequest
@@ -120,6 +121,10 @@ def build_compare_response(
     *, request_id: str, client, request: VolatilityRequest, execution: CompareExecution
 ) -> CompareResponse:
     analytics = execution.analytics
+    if not execution.load.observations:
+        # Methodology is read off the first observation, so an empty window would raise an
+        # IndexError and surface as a 500. It is an ordinary "nothing here" answer instead.
+        raise CortexError(ErrorCode.NO_DATA, "该日期区间内没有可用观测")
     first_observation = execution.load.observations[0]
     quality, quality_events = build_quality_contract(analytics.series)
     series = [

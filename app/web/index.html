@@ -110,7 +110,7 @@
             <div id="indicatorFormError" class="form-error is-hidden" role="alert"></div>
             <button id="addIndicatorButton" class="primary-button" type="button"><span>添加并加载指标</span><strong>＋</strong></button>
             <button id="cancelEditButton" class="secondary-button cancel-edit-button is-hidden" type="button">取消编辑</button>
-            <div class="saved-indicator-heading"><h2>Saved indicators</h2><button id="refreshIndicatorsButton" class="text-button" type="button">刷新激活项</button></div>
+            <div class="saved-indicator-heading"><h2>Saved indicators</h2><span class="refresh-actions"><button id="refreshIndicatorsButton" class="text-button" type="button">刷新激活项</button><button id="forceRefreshIndicatorsButton" class="text-button force-refresh-button" type="button" title="跳过本地缓存，直接向上游重新取数。上游修订过历史数据时用它。">强制刷新</button></span></div>
             <div id="savedIndicators" class="saved-indicators"><p class="empty-list-copy">尚未添加指标。</p></div>
             <p class="saved-indicator-storage-note">配置与启用状态保存在当前浏览器（换浏览器或清除站点数据后不共享）；行情响应不保存，重新打开后会重新请求。</p>
           </section>

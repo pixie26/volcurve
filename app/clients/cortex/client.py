@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import random
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -33,7 +34,11 @@ from app.clients.cortex.parser import (
     normalize_surface,
     normalize_surface_snapshots,
 )
-from app.clients.cortex.serializers import serialize_volatility_request, volatility_request_hash
+from app.clients.cortex.serializers import (
+    serialize_volatility_request,
+    volatility_coordinate_hash,
+    volatility_request_hash,
+)
 from app.config import Settings
 from app.domain.disclosures import HTTP_MAX_RETRIES, HTTP_MAX_RETRY_AFTER_SECONDS
 from app.domain.instruments import Instrument
@@ -59,7 +64,9 @@ _FIXTURE_DIR = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 @dataclass
 class FetchResult:
     payload: list
-    cache_status: str  # "live" | "hit" | "fixture"
+    # "live" (fetched now) | "hit" (exact-range cache) | "cache" (a wider stored range for
+    # the same coordinate answered this one) | "fixture"
+    cache_status: str
     correlation_id: str
     retrieved_at: datetime
 
@@ -95,6 +102,40 @@ def parse_retry_after(value: str | None, *, now: datetime | None = None) -> floa
     return min(max(seconds, 0.0), _MAX_RETRY_AFTER)
 
 
+def _within_requested_range(
+    observations: list, request: VolatilityRequest, result: FetchResult
+) -> list:
+    """Trim the surplus a wider cached range carries, and only that.
+
+    Only a covering-range reuse can hold dates outside the window: a live response and an
+    exact-hash hit are already the right shape, and a fixture is a canned sample whose
+    dates deliberately have nothing to do with the range asked for.
+    """
+    if result.cache_status != "cache":
+        return observations
+    return [
+        observation
+        for observation in observations
+        if request.start_date <= observation.date <= request.end_date
+    ]
+
+
+class _InflightFetch:
+    """The shared state of one upstream call several callers are waiting on.
+
+    `waiters` is refcounted so the entry disappears the moment the burst is over: this
+    coalesces concurrent duplicates without becoming a second, unexpiring cache layer
+    that would outlive the freshness policy.
+    """
+
+    __slots__ = ("lock", "result", "waiters")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.result: FetchResult | None = None
+        self.waiters = 0
+
+
 class CortexClient:
     def __init__(
         self,
@@ -110,6 +151,10 @@ class CortexClient:
         self._catalog = catalog or Catalog(settings.duckdb_path)
         self._raw = raw_store or RawStore(settings.raw_dir)
         self._normalized = normalized_store or NormalizedStore(settings.normalized_dir)
+        # One entry per in-flight request hash: concurrent identical requests wait for the
+        # first instead of each making the same upstream call.
+        self._inflight: dict[str, _InflightFetch] = {}
+        self._inflight_guard = threading.Lock()
         from app.config import PROJECT_ROOT
 
         self.api_version = load_api_version(PROJECT_ROOT)
@@ -210,7 +255,9 @@ class CortexClient:
             request, request_hash, request_json, policy, result
         )
         try:
-            observations = normalize_surface(canonical, request)
+            observations = _within_requested_range(
+                normalize_surface(canonical, request), request, result
+            )
         except CortexError as exc:
             self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
             raise
@@ -236,7 +283,9 @@ class CortexClient:
             request, request_hash, request_json, policy, result
         )
         try:
-            observations = normalize_surface_snapshots(canonical, request)
+            observations = _within_requested_range(
+                normalize_surface_snapshots(canonical, request), request, result
+            )
         except CortexError as exc:
             self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
             raise
@@ -255,6 +304,7 @@ class CortexClient:
         self, request: VolatilityRequest, *, force_refresh: bool
     ) -> tuple[str, str, str, FetchResult]:
         request_hash = volatility_request_hash(request, self.api_version)
+        coordinate_hash = volatility_coordinate_hash(request, self.api_version)
         wire_body = serialize_volatility_request(request)
         request_json = json.dumps(wire_body, sort_keys=True)
         policy = cache_policy_mod.cache_policy(request.end_date)
@@ -265,7 +315,44 @@ class CortexClient:
             result = None
             if not force_refresh:
                 result = self._try_cache("implied-volatility", request_hash)
+                if result is None:
+                    result = self._try_covering_cache(request, coordinate_hash)
             if result is None:
+                result = self._fetch_and_store(
+                    request,
+                    request_hash=request_hash,
+                    coordinate_hash=coordinate_hash,
+                    wire_body=wire_body,
+                    request_json=request_json,
+                    policy=policy,
+                )
+
+        return request_hash, request_json, policy, result
+
+    def _fetch_and_store(
+        self,
+        request: VolatilityRequest,
+        *,
+        request_hash: str,
+        coordinate_hash: str,
+        wire_body: dict,
+        request_json: str,
+        policy: str,
+    ) -> FetchResult:
+        """Call upstream once per request hash, even under concurrent callers.
+
+        Several indicators share one coordinate — realized vol, spot and forward all read
+        the same carrier — so a single refresh used to fire the same request several times
+        at once, each missing the cache because none had finished writing it yet.
+        """
+        state = self._join_inflight(request_hash)
+        try:
+            with state.lock:
+                if state.result is not None:
+                    # The caller we queued behind has just retrieved this exact request
+                    # from upstream, so its payload answers us too — including when we
+                    # asked for a forced refresh, since that payload is seconds old.
+                    return state.result
                 correlation_id = uuid.uuid4().hex[:12]
                 payload = self._request_with_retry(
                     "POST",
@@ -284,10 +371,58 @@ class CortexClient:
                     request_json=request_json,
                     correlation_id=correlation_id,
                     retrieved_at=retrieved_at,
+                    coordinate_hash=coordinate_hash,
                 )
-                result = FetchResult(payload, "live", correlation_id, retrieved_at)
+                state.result = FetchResult(payload, "live", correlation_id, retrieved_at)
+                return state.result
+        finally:
+            self._leave_inflight(request_hash)
 
-        return request_hash, request_json, policy, result
+    def _join_inflight(self, request_hash: str) -> _InflightFetch:
+        with self._inflight_guard:
+            state = self._inflight.get(request_hash)
+            if state is None:
+                state = _InflightFetch()
+                self._inflight[request_hash] = state
+            state.waiters += 1
+            return state
+
+    def _leave_inflight(self, request_hash: str) -> None:
+        with self._inflight_guard:
+            state = self._inflight.get(request_hash)
+            if state is None:
+                return
+            state.waiters -= 1
+            if state.waiters <= 0:
+                del self._inflight[request_hash]
+
+    def _try_covering_cache(
+        self, request: VolatilityRequest, coordinate_hash: str
+    ) -> FetchResult | None:
+        """Serve a narrower window from a stored wider one for the same coordinate.
+
+        Only the date range may differ — the coordinate hash pins the instrument, rules,
+        convention, layout and API version — and the stored entry must still be fresh
+        under its own policy, so this widens what a cache entry can answer without
+        extending how long anything is trusted.
+        """
+        entry = self._catalog.find_covering(
+            coordinate_hash=coordinate_hash,
+            endpoint="implied-volatility",
+            start_date=request.start_date,
+            end_date=request.end_date,
+        )
+        if entry is None:
+            return None
+        if not cache_policy_mod.is_fresh(entry["retrieved_at"], entry["cache_policy"]):
+            return None
+        try:
+            payload = self._raw.load("implied-volatility", entry["request_hash"])
+        except (OSError, EOFError, ValueError, json.JSONDecodeError):
+            return None
+        if payload is None:
+            return None
+        return FetchResult(payload, "cache", entry["request_hash"], entry["retrieved_at"])
 
     def _canonicalize_implied_volatility(
         self,
@@ -476,6 +611,7 @@ class CortexClient:
         request_json: str = "",
         correlation_id: str = "",
         retrieved_at: datetime | None = None,
+        coordinate_hash: str | None = None,
     ) -> None:
         retrieved_at = retrieved_at or datetime.now(UTC)
         response_hash = RawStore.payload_hash(payload)
@@ -494,6 +630,7 @@ class CortexClient:
                 policy=policy,
                 correlation_id=correlation_id,
                 error_code=ErrorCode.STORAGE_FAILED.value,
+                coordinate_hash=coordinate_hash,
             )
             raise CortexError(ErrorCode.STORAGE_FAILED, "raw response 写入失败") from exc
         self._record_state(
@@ -507,6 +644,7 @@ class CortexClient:
             status="FETCHED",
             policy=policy,
             correlation_id=correlation_id,
+            coordinate_hash=coordinate_hash,
         )
 
     def _record_state(
@@ -524,6 +662,7 @@ class CortexClient:
         request_json: str = "",
         quality_status: str = "UNKNOWN",
         error_code: str | None = None,
+        coordinate_hash: str | None = None,
     ) -> None:
         self._catalog.upsert(
             request_hash=request_hash,
@@ -540,6 +679,7 @@ class CortexClient:
             correlation_id=correlation_id,
             quality_status=quality_status,
             error_code=error_code,
+            coordinate_hash=coordinate_hash,
         )
 
     # ------------------------------------------------------------------ http

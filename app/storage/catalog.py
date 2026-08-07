@@ -36,6 +36,9 @@ class Catalog:
         with self._lock:
             self._conn.execute(_DDL)
             self._conn.execute("ALTER TABLE requests ADD COLUMN IF NOT EXISTS error_code VARCHAR")
+            self._conn.execute(
+                "ALTER TABLE requests ADD COLUMN IF NOT EXISTS coordinate_hash VARCHAR"
+            )
 
     def get(self, request_hash: str) -> dict | None:
         with self._lock:
@@ -83,14 +86,26 @@ class Catalog:
         correlation_id: str,
         quality_status: str,
         error_code: str | None = None,
+        coordinate_hash: str | None = None,
     ) -> None:
         with self._lock:
+            if coordinate_hash is None:
+                # A row advances FETCHED -> SCHEMA_VALIDATED -> NORMALIZED -> COMPLETED, and
+                # only the first write carries the coordinate. Since the coordinate is a pure
+                # function of the request, keep whatever the row already knows rather than
+                # letting a later transition blank it out.
+                existing = self._conn.execute(
+                    "SELECT coordinate_hash FROM requests WHERE request_hash = ?",
+                    [request_hash],
+                ).fetchone()
+                if existing is not None:
+                    coordinate_hash = existing[0]
             self._conn.execute(
                 "INSERT OR REPLACE INTO requests ("
                 "request_hash, endpoint, api_version, instrument, start_date, end_date, "
                 "request_json, response_hash, retrieved_at, status, cache_policy, "
-                "correlation_id, quality_status, error_code"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "correlation_id, quality_status, error_code, coordinate_hash"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     request_hash,
                     endpoint,
@@ -106,8 +121,36 @@ class Catalog:
                     correlation_id,
                     quality_status,
                     error_code,
+                    coordinate_hash,
                 ],
             )
+
+    def find_covering(
+        self,
+        *,
+        coordinate_hash: str,
+        endpoint: str,
+        start_date: date,
+        end_date: date,
+    ) -> dict | None:
+        """Find a completed response for the same coordinate whose range covers this one.
+
+        Prefers the tightest covering range so the least surplus data has to be parsed.
+        Freshness is still the caller's decision, exactly as for an exact-hash hit.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT request_hash, retrieved_at, cache_policy, start_date, end_date"
+                " FROM requests"
+                " WHERE coordinate_hash = ? AND endpoint = ? AND status = 'COMPLETED'"
+                "   AND start_date <= ? AND end_date >= ?"
+                " ORDER BY (end_date - start_date) ASC LIMIT 1",
+                [coordinate_hash, endpoint, start_date, end_date],
+            ).fetchone()
+        if row is None:
+            return None
+        keys = ("request_hash", "retrieved_at", "cache_policy", "start_date", "end_date")
+        return dict(zip(keys, row, strict=True))
 
     def close(self) -> None:
         with self._lock:
