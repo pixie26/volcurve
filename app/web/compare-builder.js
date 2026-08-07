@@ -64,6 +64,9 @@
   // A board is a named, reloadable page: which indicators exist, how they are spread
   // across lanes and over which dates. It stores configuration only — never responses —
   // so opening one always re-requests the data.
+  // defaultVisible: false marks the less commonly used statistics — longer windows that
+  // need more history than most ranges have, and secondary metrics most users won't
+  // reach for day to day. They stay one click away in 统计项设置, just off by default.
   const STAT_COLUMNS = [
     { id: "lane", label: "坐标", kind: "text" },
     { id: "count", label: "观测数", kind: "count" },
@@ -72,34 +75,34 @@
     { id: "change1", label: "1D 变化", kind: "signed" },
     { id: "change5", label: "5D 变化", kind: "signed" },
     { id: "change20", label: "20D 变化", kind: "signed" },
-    { id: "change60", label: "60D 变化", kind: "signed" },
+    { id: "change60", label: "60D 变化", kind: "signed", defaultVisible: false },
     { id: "min", label: "最小", kind: "value" },
     { id: "max", label: "最大", kind: "value" },
     { id: "range", label: "区间 (最大−最小)", kind: "value" },
     { id: "mean", label: "平均", kind: "value" },
     { id: "mean20", label: "20D 均值", kind: "value" },
-    { id: "mean60", label: "60D 均值", kind: "value" },
-    { id: "vsMean20", label: "最新值 − 20D 均值", kind: "signed" },
+    { id: "mean60", label: "60D 均值", kind: "value", defaultVisible: false },
+    { id: "vsMean20", label: "最新值 − 20D 均值", kind: "signed", defaultVisible: false },
     { id: "median", label: "中位数", kind: "value" },
-    { id: "p25", label: "25% 分位", kind: "value" },
-    { id: "p75", label: "75% 分位", kind: "value" },
+    { id: "p25", label: "25% 分位", kind: "value", defaultVisible: false },
+    { id: "p75", label: "75% 分位", kind: "value", defaultVisible: false },
     { id: "stdDev", label: "标准差", kind: "value" },
     { id: "iqr", label: "IQR", kind: "value" },
     { id: "percentile", label: "最新值百分位", kind: "percentile" },
     { id: "zScore", label: "Z-score", kind: "zscore" },
     { id: "maxDate", label: "最大值日期", kind: "text" },
-    { id: "sessionsSinceMax", label: "距最大值 (观测数)", kind: "count" },
+    { id: "sessionsSinceMax", label: "距最大值 (观测数)", kind: "count", defaultVisible: false },
     { id: "minDate", label: "最小值日期", kind: "text" },
-    { id: "sessionsSinceMin", label: "距最小值 (观测数)", kind: "count" },
+    { id: "sessionsSinceMin", label: "距最小值 (观测数)", kind: "count", defaultVisible: false },
     { id: "largestGain", label: "最大单日上升", kind: "signed" },
     { id: "largestDrop", label: "最大单日下降", kind: "signed" },
-    { id: "meanAbsChange", label: "平均单日绝对变化", kind: "value" },
-    { id: "positiveShare", label: "正值占比", kind: "percent" },
+    { id: "meanAbsChange", label: "平均单日绝对变化", kind: "value", defaultVisible: false },
+    { id: "positiveShare", label: "正值占比", kind: "percent", defaultVisible: false },
     { id: "skewness", label: "偏度", kind: "ratio" },
     { id: "kurtosis", label: "峰度", kind: "ratio" },
     { id: "autocorrelation", label: "自相关(1)", kind: "ratio" },
-    { id: "autocorrelation5", label: "自相关(5)", kind: "ratio" },
-    { id: "autocorrelation20", label: "自相关(20)", kind: "ratio" },
+    { id: "autocorrelation5", label: "自相关(5)", kind: "ratio", defaultVisible: false },
+    { id: "autocorrelation20", label: "自相关(20)", kind: "ratio", defaultVisible: false },
   ];
 
   function defaultDraft(type) {
@@ -1814,9 +1817,10 @@
       seen.add(entry.id);
       ordered.push({ id: entry.id, visible: entry.visible !== false });
     }
-    // Columns added after the user saved their layout appear at the end, visible.
+    // Columns added after the user saved their layout appear at the end, using that
+    // column's own default — this is also what a first-ever visit falls through to.
     for (const column of STAT_COLUMNS) {
-      if (!seen.has(column.id)) ordered.push({ id: column.id, visible: true });
+      if (!seen.has(column.id)) ordered.push({ id: column.id, visible: column.defaultVisible !== false });
     }
     indicatorState.statsColumns = ordered;
   }
@@ -1858,7 +1862,7 @@
       renderIndicatorStats();
     });
     $("statsColumnsResetButton").addEventListener("click", () => {
-      indicatorState.statsColumns = STAT_COLUMNS.map((column) => ({ id: column.id, visible: true }));
+      indicatorState.statsColumns = STAT_COLUMNS.map((column) => ({ id: column.id, visible: column.defaultVisible !== false }));
       persistStatsColumns();
       renderStatsColumnConfig();
       renderIndicatorStats();

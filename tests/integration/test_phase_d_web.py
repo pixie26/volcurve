@@ -457,7 +457,19 @@ def test_statistics_columns_are_configurable_and_cover_the_full_metric_set():
 
     restore = javascript.split("function restoreStatsColumns", 1)[1].split("function persistStatsColumns", 1)[0]
     # Columns added in a later release must not disappear for users with a saved layout.
-    assert "if (!seen.has(column.id)) ordered.push({ id: column.id, visible: true })" in restore
+    assert "if (!seen.has(column.id)) ordered.push({ id: column.id, visible: column.defaultVisible !== false })" in restore
+
+    # Longer-window and secondary statistics default to hidden, one click away.
+    hidden_by_default = ("change60", "mean60", "vsMean20", "p25", "p75", "sessionsSinceMax",
+                          "sessionsSinceMin", "meanAbsChange", "positiveShare",
+                          "autocorrelation5", "autocorrelation20")
+    for metric in hidden_by_default:
+        assert f'id: "{metric}", label:' in columns and "defaultVisible: false" in columns.split(f'id: "{metric}",', 1)[1].split("\n", 1)[0]
+    # The everyday statistics stay on by default.
+    for metric in ("change1", "change5", "change20", "mean", "mean20", "median",
+                   "stdDev", "percentile", "zScore", "skewness", "kurtosis", "autocorrelation"):
+        line = columns.split(f'id: "{metric}",', 1)[1].split("\n", 1)[0]
+        assert "defaultVisible: false" not in line
 
     # Volatility renders at one decimal; percentile and z-score share a colour scale.
     digits = javascript.split("function valueDigits", 1)[1].split("function percentileBucket", 1)[0]
