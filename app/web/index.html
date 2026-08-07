@@ -60,10 +60,17 @@
           <section class="form-section">
             <div class="section-heading-row"><h2>1 · 日期范围</h2><span class="step-badge">全局</span></div>
             <div class="field-grid two">
+              <label class="field"><span>范围类型</span><select id="dateMode">
+                <option value="sliding">滚动窗口</option>
+                <option value="fixed">固定日期</option>
+              </select></label>
+              <label id="slidingWindowField" class="field"><span>窗口长度</span><select id="slidingWindow"></select></label>
+            </div>
+            <div class="field-grid two">
               <label class="field"><span>开始日期</span><input id="startDate" type="date" required /></label>
               <label class="field"><span>结束日期</span><input id="endDate" type="date" required /></label>
             </div>
-            <small>日期范围对所有坐标与 indicator 共享；修改后已保存的 indicator 需要刷新才会重新取数。</small>
+            <small id="dateModeNote"></small>
           </section>
 
           <section class="form-section">

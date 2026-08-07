@@ -79,6 +79,8 @@ button { color: inherit; }
 .field > span { color: #465149; font-size: 11px; font-weight: 700; }
 .field input, .field select { width: 100%; min-width: 0; height: 38px; padding: 0 10px; color: var(--ink); background: var(--panel); border: 1px solid #cbd3c8; border-radius: 8px; outline: none; }
 .field input:focus, .field select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(15,117,84,.1); }
+/* Dates derived from a sliding window are shown but not editable. */
+.field input.is-derived { color: var(--muted); background: #f1f3ed; border-style: dashed; cursor: not-allowed; }
 .field small, .form-section > small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .input-action { display: grid; grid-template-columns: 1fr 38px; gap: 6px; }
 .icon-button { height: 38px; border: 1px solid #cbd3c8; border-radius: 8px; background: var(--panel); cursor: pointer; font-size: 20px; }

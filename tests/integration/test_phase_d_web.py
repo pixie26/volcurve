@@ -273,6 +273,37 @@ def test_provider_name_is_not_shown_in_the_interface():
     assert "code_type" in pages["app.js"]
 
 
+def test_date_range_supports_sliding_windows_and_fixed_dates():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'id="dateMode"' in html
+    assert 'id="slidingWindow"' in html
+    assert '<option value="sliding">' in html and '<option value="fixed">' in html
+
+    windows = javascript.split("const SLIDING_WINDOWS = [", 1)[1].split("];", 1)[0]
+    for window in ("1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "5Y", "10Y"):
+        assert f'id: "{window}"' in windows
+
+    span = javascript.split("function slidingRange", 1)[1].split("// Writes today's window", 1)[0]
+    # The window is measured back from today, so the end date follows the calendar.
+    assert "isoDate(new Date())" in span
+    assert "end: today" in span
+
+    # Reopening a board re-derives a sliding range instead of replaying stored dates.
+    open_board = javascript.split("function openBoard", 1)[1].split("function renderBoards", 1)[0]
+    assert "syncSlidingRange()" in open_board
+    assert "indicatorState.dateMode = board.dateMode" in open_board
+    # A manual refresh catches the day rolling over on a long-lived tab.
+    refresh = javascript.split("async function refreshActiveIndicators", 1)[1].split("function invalidateIndicators", 1)[0]
+    assert "syncSlidingRange()" in refresh
+
+    # Workspaces and boards saved before sliding ranges existed keep their explicit dates.
+    assert 'stored.scope?.dateMode === "sliding" ? "sliding" : "fixed"' in javascript
+    assert 'board.dateMode === "sliding" ? "sliding" : "fixed"' in javascript
+
+
 def test_boards_live_in_the_topbar_not_the_query_rail():
     with TestClient(app) as client:
         html = client.get("/").text

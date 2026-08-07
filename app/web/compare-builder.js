@@ -24,7 +24,23 @@
     activeBoardId: null,
     statsColumns: [],
     columnWidths: {},
+    dateMode: "sliding",
+    slidingWindow: "1Y",
   };
+
+  // A sliding range is re-derived from today every time the workspace or a board opens,
+  // so reopening tomorrow pulls tomorrow's data without touching the configuration.
+  const SLIDING_WINDOWS = [
+    { id: "1M", label: "近 1 个月", months: 1 },
+    { id: "3M", label: "近 3 个月", months: 3 },
+    { id: "6M", label: "近 6 个月", months: 6 },
+    { id: "YTD", label: "年初至今", ytd: true },
+    { id: "1Y", label: "近 1 年", years: 1 },
+    { id: "2Y", label: "近 2 年", years: 2 },
+    { id: "3Y", label: "近 3 年", years: 3 },
+    { id: "5Y", label: "近 5 年", years: 5 },
+    { id: "10Y", label: "近 10 年", years: 10 },
+  ];
 
   const STATS_LABEL_COLUMN = "__label__";
   const DEFAULT_LABEL_WIDTH = 190;
@@ -121,6 +137,7 @@
     for (const id of ["startDate", "endDate"]) {
       $(id).addEventListener("change", invalidateIndicators);
     }
+    bindDateModeControls();
     bindScopeFields();
     bindBoardControls();
     bindStatsColumnControls();
@@ -138,11 +155,70 @@
     restoreStatsColumns();
     restoreBoards();
     restoreWorkspace();
+    syncSlidingRange();
+    renderDateMode();
     syncWorkspaceMode();
     renderIndicatorConfig();
     renderBuilderMode();
     renderStatsColumnConfig();
     renderBoards();
+  }
+
+  function bindDateModeControls() {
+    $("slidingWindow").innerHTML = SLIDING_WINDOWS
+      .map((window) => `<option value="${window.id}">${escapeHtml(window.label)}</option>`).join("");
+    $("dateMode").addEventListener("change", () => {
+      indicatorState.dateMode = $("dateMode").value === "fixed" ? "fixed" : "sliding";
+      applyDateModeChange();
+    });
+    $("slidingWindow").addEventListener("change", () => {
+      indicatorState.slidingWindow = $("slidingWindow").value;
+      applyDateModeChange();
+    });
+  }
+
+  function applyDateModeChange() {
+    const moved = syncSlidingRange();
+    renderDateMode();
+    persistWorkspace();
+    if (moved) invalidateIndicators();
+  }
+
+  function slidingRange(windowId) {
+    const today = isoDate(new Date());
+    const window = SLIDING_WINDOWS.find((entry) => entry.id === windowId)
+      || SLIDING_WINDOWS.find((entry) => entry.id === "1Y");
+    if (window.ytd) return { start: `${today.slice(0, 4)}-01-01`, end: today };
+    return {
+      start: addCalendar(today, { years: -(window.years || 0), months: -(window.months || 0) }),
+      end: today,
+    };
+  }
+
+  // Writes today's window into the date inputs. Returns whether the range actually moved,
+  // so callers only invalidate loaded series when the dates really changed.
+  function syncSlidingRange() {
+    if (indicatorState.dateMode !== "sliding") return false;
+    const { start, end } = slidingRange(indicatorState.slidingWindow);
+    const moved = $("startDate").value !== start || $("endDate").value !== end;
+    $("startDate").value = start;
+    $("endDate").value = end;
+    return moved;
+  }
+
+  function renderDateMode() {
+    const sliding = indicatorState.dateMode === "sliding";
+    $("dateMode").value = sliding ? "sliding" : "fixed";
+    $("slidingWindow").value = indicatorState.slidingWindow;
+    $("slidingWindowField").classList.toggle("is-hidden", !sliding);
+    for (const id of ["startDate", "endDate"]) {
+      $(id).disabled = sliding;
+      $(id).classList.toggle("is-derived", sliding);
+    }
+    const label = SLIDING_WINDOWS.find((entry) => entry.id === indicatorState.slidingWindow)?.label || "近 1 年";
+    $("dateModeNote").textContent = sliding
+      ? `${label}：结束日期跟随今天，每次打开页面、载入 board 或点「刷新激活项」都会重新算到当天，因此拿到的是最新数据。`
+      : "固定日期：范围保持不变，重新打开也只取这段区间。日期范围对所有坐标与 indicator 共享；修改后已保存的 indicator 需要刷新才会重新取数。";
   }
 
   // The underlying and the target chart lane live above the indicator builder so a new
@@ -212,6 +288,10 @@
       }
       if (validIsoDate(stored.scope?.startDate)) $("startDate").value = stored.scope.startDate;
       if (validIsoDate(stored.scope?.endDate)) $("endDate").value = stored.scope.endDate;
+      // A workspace saved before sliding ranges existed keeps its explicit dates; only a
+      // brand new workspace starts on the sliding default.
+      indicatorState.dateMode = stored.scope?.dateMode === "sliding" ? "sliding" : "fixed";
+      indicatorState.slidingWindow = normalizeSlidingWindow(stored.scope?.slidingWindow);
       const seen = new Set();
       indicatorState.items = stored.items.flatMap((storedItem) => {
         const id = Number(storedItem?.id);
@@ -267,6 +347,8 @@
           instrumentCode: $("instrumentCode").value.trim(),
           startDate: $("startDate").value,
           endDate: $("endDate").value,
+          dateMode: indicatorState.dateMode,
+          slidingWindow: indicatorState.slidingWindow,
         },
         selectedDetailId: indicatorState.selectedDetailId,
         activeBoardId: indicatorState.activeBoardId,
@@ -298,6 +380,8 @@
           savedAt: String(board.savedAt || ""),
           startDate: validIsoDate(board.startDate) ? board.startDate : "",
           endDate: validIsoDate(board.endDate) ? board.endDate : "",
+          dateMode: board.dateMode === "sliding" ? "sliding" : "fixed",
+          slidingWindow: normalizeSlidingWindow(board.slidingWindow),
           chartCount: clampLaneCount(board.chartCount),
           columnWidths: normalizeColumnWidths(board.columnWidths),
           items: normalizeBoardItems(board.items),
@@ -322,6 +406,10 @@
   function clampLaneCount(value) {
     const count = Number(value);
     return Number.isInteger(count) ? Math.min(MAX_CHARTS, Math.max(1, count)) : 1;
+  }
+
+  function normalizeSlidingWindow(value) {
+    return SLIDING_WINDOWS.some((entry) => entry.id === value) ? value : "1Y";
   }
 
   function normalizeColumnWidths(raw) {
@@ -364,6 +452,8 @@
       savedAt: new Date().toISOString(),
       startDate: $("startDate").value,
       endDate: $("endDate").value,
+      dateMode: indicatorState.dateMode,
+      slidingWindow: indicatorState.slidingWindow,
       chartCount: indicatorState.chartCount,
       columnWidths: { ...indicatorState.columnWidths },
       items: indicatorState.items.map((item) => structuredClone(serializeItem(item))),
@@ -422,8 +512,14 @@
     hideIndicatorFormError();
     const board = boardById(id);
     if (!board) return showBoardStatus("请先在下拉框中选择一个 board。");
+    indicatorState.dateMode = board.dateMode;
+    indicatorState.slidingWindow = board.slidingWindow;
     if (board.startDate) $("startDate").value = board.startDate;
     if (board.endDate) $("endDate").value = board.endDate;
+    // A board saved with a sliding range re-derives its dates from today, not from the
+    // dates that happened to be on screen when it was saved.
+    syncSlidingRange();
+    renderDateMode();
     indicatorState.items = board.items.map((item) => ({
       id: item.id,
       type: item.type,
@@ -1006,6 +1102,11 @@
 
   async function refreshActiveIndicators() {
     hideIndicatorFormError();
+    // Catch the day rolling over on a tab that has been open since yesterday.
+    if (syncSlidingRange()) {
+      renderDateMode();
+      persistWorkspace();
+    }
     const fetchable = indicatorState.items.filter((item) => item.active && item.type !== "derived");
     await Promise.all(fetchable.map(fetchIndicator));
     refreshWorkspacePanels();
