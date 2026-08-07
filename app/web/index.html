@@ -37,6 +37,22 @@
             <label><input type="radio" name="queryKind" value="surface" /><span>Surface</span></label>
           </fieldset>
 
+          <section id="boardSection" class="form-section board-section">
+            <div class="section-heading-row"><h2>Boards</h2><span id="boardCount" class="mini-badge">0</span></div>
+            <p id="activeBoardLabel" class="board-active-label">当前工作区尚未保存为 board。</p>
+            <div class="field-grid board-load-row">
+              <label class="field"><span>已保存 board</span><select id="boardSelect"></select></label>
+              <button id="loadBoardButton" class="secondary-button" type="button" disabled>载入</button>
+            </div>
+            <label class="field field-wide"><span>Board 名称</span><input id="boardName" type="text" maxlength="60" autocomplete="off" placeholder="例如 QQQ 期限结构监控" /></label>
+            <div class="board-actions">
+              <button id="saveBoardAsButton" class="secondary-button" type="button">另存为新 board</button>
+              <button id="updateBoardButton" class="secondary-button" type="button" disabled>更新当前 board</button>
+              <button id="deleteBoardButton" class="secondary-button board-danger" type="button" disabled>删除所选</button>
+            </div>
+            <small>Board 保存 indicator 配置、坐标布局与日期范围，不保存行情。载入时会按保存的日期范围重新向 BNP 取数，因此拿到的是最新数据。</small>
+          </section>
+
           <section class="form-section">
             <div class="section-heading-row"><h2>1 · 日期范围</h2><span class="step-badge">全局</span></div>
             <div class="field-grid two">
@@ -78,8 +94,10 @@
             </label>
             <div id="indicatorConfig"></div>
             <p id="indicatorBuilderNote" class="inline-note"></p>
+            <p id="builderModeNote" class="builder-mode-note is-hidden"></p>
             <div id="indicatorFormError" class="form-error is-hidden" role="alert"></div>
             <button id="addIndicatorButton" class="primary-button" type="button"><span>添加并加载指标</span><strong>＋</strong></button>
+            <button id="cancelEditButton" class="secondary-button cancel-edit-button is-hidden" type="button">取消编辑</button>
             <div class="saved-indicator-heading"><h2>Saved indicators</h2><button id="refreshIndicatorsButton" class="text-button" type="button">刷新激活项</button></div>
             <div id="savedIndicators" class="saved-indicators"><p class="empty-list-copy">尚未添加指标。</p></div>
             <p class="saved-indicator-storage-note">配置与启用状态保存在当前浏览器（换浏览器或清除站点数据后不共享）；行情响应不保存，重新打开后会重新请求。</p>
@@ -142,10 +160,20 @@
           <section class="panel table-panel stats-panel">
             <div class="panel-heading">
               <div><p class="eyebrow">RANGE STATISTICS</p><h3>显示中指标的区间统计</h3></div>
-              <span id="indicatorStatsCount" class="outline-badge">0 series</span>
+              <div class="stats-heading-actions">
+                <details class="stats-columns">
+                  <summary id="statsColumnSummary">列设置</summary>
+                  <div class="stats-columns-popover">
+                    <p>勾选要显示的列，用 ↑ ↓ 调整顺序；设置保存在当前浏览器。</p>
+                    <div id="statsColumnList" class="stats-column-list"></div>
+                    <button id="statsColumnsResetButton" class="secondary-button" type="button">全部显示并恢复默认顺序</button>
+                  </div>
+                </details>
+                <span id="indicatorStatsCount" class="outline-badge">0 series</span>
+              </div>
             </div>
             <div class="table-scroll"><table><thead id="indicatorStatsHead"></thead><tbody id="indicatorStatsBody"></tbody></table></div>
-            <p class="table-footnote">统计只使用当前日期范围内的有效值：缺失点被跳过，不插值也不前向填充。百分位 = 区间内 ≤ 最新值的观测占比。</p>
+            <p class="table-footnote">统计只使用当前日期范围内的有效值：缺失点被跳过，不插值也不前向填充。1D/5D/20D 变化与自相关按有效观测计数，不按日历天。百分位 = 区间内 ≤ 最新值的观测占比；偏度与峰度为样本值（峰度已减 3）。</p>
           </section>
 
           <section class="panel compare-guidance">

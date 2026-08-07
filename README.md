@@ -111,7 +111,8 @@ raw 响应 gzip 压缩,以请求哈希命名;normalized 落 parquet。
 - ✅ Phase D / Phase 5 — 动态 Web、Compare/Surface、listed 合约坐标发现、smile/term structure、表格/CSV、methodology、quality/activity/disclosures（技术 Gate 通过，UX 待修订）
 - ✅ Phase E / Phase 6–7 — 独立数值核对、完整 secret/dependency scan、single-worker 部署与运维说明（Gate E PASS；Docker build 待部署主机复验）
 - 🚧 Phase F1 — Compare 支持最多 5 个上下同步坐标、每 indicator 独立标的、同日 hover、矩形 zoom 与跨页面重开恢复；逐 indicator 数据、方法、质量、activity、disclosures 与 CSV 已接回；等待用户 UI 验收
-- 🚧 Phase F2 — 跨坐标 hover 读数条（hover 任一坐标即读出该日期在全部坐标上的数值）、查询栏改为「日期范围 → underlying + 坐标 → indicator」单一入口、saved indicator 之间的 ＋ − × ÷ 组合指标、显示中指标的区间统计表（最大/最小/平均/中位数/标准差/最新值百分位）；等待用户 UI 验收
+- 🚧 Phase F2 — 跨坐标 hover 读数条与同步竖向指示线（hover 任一坐标即读出该日期在全部坐标上的数值）、查询栏改为「日期范围 → underlying + 坐标 → indicator」单一入口、saved indicator 之间的 ＋ − × ÷ 组合指标、显示中指标的区间统计表；等待用户 UI 验收
+- 🚧 Phase F3 — saved indicator 支持就地编辑与复制；board（具名可重载页面）保存 indicator 配置 + 坐标布局 + 日期范围并在载入时重新取数；区间统计扩展到 24 项（变化/IQR/z-score/极值日期/最大单日涨跌/偏度/峰度/自相关等），列的显示与顺序可自定义并保存；等待用户 UI 验收
 
 代码级审阅、原计划修订意见和 Gate 状态见
 [`docs/optimization_review_zh.md`](docs/optimization_review_zh.md)。

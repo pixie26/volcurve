@@ -2,6 +2,8 @@
 
 (() => {
   const STORAGE_KEY = "volcurve.compare.workspace.v1";
+  const BOARD_STORAGE_KEY = "volcurve.compare.boards.v1";
+  const STATS_STORAGE_KEY = "volcurve.compare.statscolumns.v1";
   const MAX_CHARTS = 5;
   const indicatorState = {
     items: [],
@@ -16,6 +18,11 @@
     seriesIndex: new Map(),
     operandSignature: "",
     hoverDate: null,
+    editingId: null,
+    boards: [],
+    nextBoardId: 1,
+    activeBoardId: null,
+    statsColumns: [],
   };
 
   const TYPE_LABELS = {
@@ -29,6 +36,36 @@
   const VOL_TYPES = new Set(["implied_vol", "realized_vol"]);
   const PRICE_TYPES = new Set(["spot", "forward"]);
   const PALETTE = ["#0f7554", "#3557a4", "#d66a2d", "#8c6bb1", "#bf3d5d", "#4e8f9c", "#8e7b28"];
+
+  // A board is a named, reloadable page: which indicators exist, how they are spread
+  // across lanes and over which dates. It stores configuration only — never responses —
+  // so opening one always re-requests the data.
+  const STAT_COLUMNS = [
+    { id: "lane", label: "坐标", kind: "text" },
+    { id: "count", label: "观测数", kind: "count" },
+    { id: "latest", label: "最新值", kind: "value" },
+    { id: "latestDate", label: "最新日期", kind: "text" },
+    { id: "change1", label: "1D 变化", kind: "signed" },
+    { id: "change5", label: "5D 变化", kind: "signed" },
+    { id: "change20", label: "20D 变化", kind: "signed" },
+    { id: "min", label: "最小", kind: "value" },
+    { id: "max", label: "最大", kind: "value" },
+    { id: "range", label: "区间 (最大−最小)", kind: "value" },
+    { id: "mean", label: "平均", kind: "value" },
+    { id: "mean20", label: "20D 均值", kind: "value" },
+    { id: "median", label: "中位数", kind: "value" },
+    { id: "stdDev", label: "标准差", kind: "value" },
+    { id: "iqr", label: "IQR", kind: "value" },
+    { id: "percentile", label: "最新值百分位", kind: "percentile" },
+    { id: "zScore", label: "Z-score", kind: "ratio" },
+    { id: "maxDate", label: "最大值日期", kind: "text" },
+    { id: "minDate", label: "最小值日期", kind: "text" },
+    { id: "largestGain", label: "最大单日上升", kind: "signed" },
+    { id: "largestDrop", label: "最大单日下降", kind: "signed" },
+    { id: "skewness", label: "偏度", kind: "ratio" },
+    { id: "kurtosis", label: "峰度", kind: "ratio" },
+    { id: "autocorrelation", label: "自相关(1)", kind: "ratio" },
+  ];
 
   function defaultDraft(type) {
     return {
@@ -63,7 +100,8 @@
       renderScopeFields();
       renderIndicatorConfig();
     });
-    $("addIndicatorButton").addEventListener("click", addIndicator);
+    $("addIndicatorButton").addEventListener("click", submitIndicator);
+    $("cancelEditButton").addEventListener("click", cancelEditing);
     $("refreshIndicatorsButton").addEventListener("click", refreshActiveIndicators);
     $("addChartButton").addEventListener("click", addChartLane);
     $("indicatorCharts").addEventListener("click", handleChartStackClick);
@@ -78,20 +116,27 @@
       $(id).addEventListener("change", invalidateIndicators);
     }
     bindScopeFields();
+    bindBoardControls();
+    bindStatsColumnControls();
     document.querySelectorAll('input[name="queryKind"]').forEach((input) => {
       input.addEventListener("change", syncWorkspaceMode);
     });
     window.addEventListener("volcurve:capabilities", () => {
       renderIndicatorConfig();
-      refreshWorkspaceViews({ details: false });
+      refreshWorkspacePanels({ details: false });
       if (indicatorState.restorePending) {
         indicatorState.restorePending = false;
         refreshActiveIndicators();
       }
     });
+    restoreStatsColumns();
+    restoreBoards();
     restoreWorkspace();
     syncWorkspaceMode();
     renderIndicatorConfig();
+    renderBuilderMode();
+    renderStatsColumnConfig();
+    renderBoards();
   }
 
   // The underlying and the target chart lane live above the indicator builder so a new
@@ -124,6 +169,7 @@
       }
     }
     $("chartLaneField").classList.toggle("is-hidden", !compare);
+    $("boardSection").classList.toggle("is-hidden", !compare);
     $("underlyingField").classList.toggle("is-hidden", compare && indicatorState.draft.type === "derived");
   }
 
@@ -146,7 +192,7 @@
       }
     }
     renderScopeFields();
-    refreshWorkspaceViews({ details: false });
+    refreshWorkspacePanels({ details: false });
   }
 
   function restoreWorkspace() {
@@ -184,6 +230,8 @@
       indicatorState.nextId = Math.max(0, ...indicatorState.items.map((item) => item.id)) + 1;
       const selectedId = Number(stored.selectedDetailId);
       indicatorState.selectedDetailId = indicatorState.items.some((item) => item.id === selectedId) ? selectedId : null;
+      const boardId = Number(stored.activeBoardId);
+      indicatorState.activeBoardId = indicatorState.boards.some((board) => board.id === boardId) ? boardId : null;
       indicatorState.restorePending = indicatorState.items.some((item) => item.active);
     } catch (error) {
       showIndicatorFormError(`无法读取浏览器中保存的 indicators：${error.message}`);
@@ -214,17 +262,183 @@
           endDate: $("endDate").value,
         },
         selectedDetailId: indicatorState.selectedDetailId,
+        activeBoardId: indicatorState.activeBoardId,
         chartCount: indicatorState.chartCount,
-        items: indicatorState.items.map((item) => ({
-          id: item.id,
-          type: item.type,
-          config: item.config,
-          active: item.active,
-        })),
+        items: indicatorState.items.map(serializeItem),
       }));
     } catch (error) {
       showIndicatorFormError(`浏览器无法保存 indicators：${error.message}`);
     }
+  }
+
+  function serializeItem(item) {
+    return { id: item.id, type: item.type, config: item.config, active: item.active };
+  }
+
+  // ---------------------------------------------------------------- saved boards
+
+  function restoreBoards() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(BOARD_STORAGE_KEY) || "null");
+      if (stored?.version !== 1 || !Array.isArray(stored.boards)) return;
+      indicatorState.boards = stored.boards.flatMap((board) => {
+        const id = Number(board?.id);
+        if (!Number.isSafeInteger(id) || id < 1 || !Array.isArray(board.items)) return [];
+        return [{
+          id,
+          name: String(board.name || `板块 ${id}`).slice(0, 60),
+          savedAt: String(board.savedAt || ""),
+          startDate: validIsoDate(board.startDate) ? board.startDate : "",
+          endDate: validIsoDate(board.endDate) ? board.endDate : "",
+          chartCount: clampLaneCount(board.chartCount),
+          items: normalizeBoardItems(board.items),
+        }];
+      });
+      indicatorState.nextBoardId = Math.max(0, ...indicatorState.boards.map((board) => board.id)) + 1;
+    } catch (error) {
+      showIndicatorFormError(`无法读取已保存的 board：${error.message}`);
+    }
+  }
+
+  function normalizeBoardItems(items) {
+    const seen = new Set();
+    return items.flatMap((item) => {
+      const id = Number(item?.id);
+      if (!Number.isSafeInteger(id) || id < 1 || seen.has(id) || !Object.hasOwn(TYPE_LABELS, item?.type)) return [];
+      seen.add(id);
+      return [{ id, type: item.type, config: normalizeStoredConfig(item.type, item.config), active: item.active !== false }];
+    });
+  }
+
+  function clampLaneCount(value) {
+    const count = Number(value);
+    return Number.isInteger(count) ? Math.min(MAX_CHARTS, Math.max(1, count)) : 1;
+  }
+
+  function persistBoards() {
+    try {
+      localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify({ version: 1, boards: indicatorState.boards }));
+    } catch (error) {
+      showIndicatorFormError(`浏览器无法保存 board：${error.message}`);
+    }
+  }
+
+  function bindBoardControls() {
+    $("saveBoardAsButton").addEventListener("click", saveBoardAs);
+    $("updateBoardButton").addEventListener("click", updateActiveBoard);
+    $("deleteBoardButton").addEventListener("click", deleteActiveBoard);
+    $("loadBoardButton").addEventListener("click", () => openBoard($("boardSelect").value));
+    $("boardSelect").addEventListener("change", () => {
+      const board = boardById($("boardSelect").value);
+      $("boardName").value = board ? board.name : "";
+      renderBoardActions();
+    });
+  }
+
+  function boardById(id) {
+    return indicatorState.boards.find((board) => String(board.id) === String(id)) || null;
+  }
+
+  function currentBoardSnapshot(name) {
+    return {
+      name,
+      savedAt: new Date().toISOString(),
+      startDate: $("startDate").value,
+      endDate: $("endDate").value,
+      chartCount: indicatorState.chartCount,
+      items: indicatorState.items.map((item) => structuredClone(serializeItem(item))),
+    };
+  }
+
+  function saveBoardAs() {
+    hideIndicatorFormError();
+    const name = $("boardName").value.trim();
+    if (!name) return showIndicatorFormError("请先给这个 board 起一个名字。");
+    if (!indicatorState.items.length) return showIndicatorFormError("当前没有 indicator，board 会是空的。");
+    const board = { id: indicatorState.nextBoardId++, ...currentBoardSnapshot(name) };
+    indicatorState.boards.push(board);
+    indicatorState.activeBoardId = board.id;
+    persistBoards();
+    persistWorkspace();
+    renderBoards();
+  }
+
+  function updateActiveBoard() {
+    hideIndicatorFormError();
+    const board = boardById(indicatorState.activeBoardId);
+    if (!board) return showIndicatorFormError("当前没有打开的 board；请先用「另存为」创建一个。");
+    Object.assign(board, currentBoardSnapshot($("boardName").value.trim() || board.name));
+    persistBoards();
+    renderBoards();
+  }
+
+  function deleteActiveBoard() {
+    hideIndicatorFormError();
+    const board = boardById($("boardSelect").value);
+    if (!board) return showIndicatorFormError("请先在下拉框中选择要删除的 board。");
+    indicatorState.boards = indicatorState.boards.filter((candidate) => candidate.id !== board.id);
+    if (indicatorState.activeBoardId === board.id) indicatorState.activeBoardId = null;
+    persistBoards();
+    persistWorkspace();
+    renderBoards();
+  }
+
+  // Opening a board restores the configuration and then re-requests every active
+  // indicator, so a board always shows current data rather than a frozen snapshot.
+  function openBoard(id) {
+    hideIndicatorFormError();
+    const board = boardById(id);
+    if (!board) return showIndicatorFormError("请先在下拉框中选择一个 board。");
+    if (board.startDate) $("startDate").value = board.startDate;
+    if (board.endDate) $("endDate").value = board.endDate;
+    indicatorState.items = board.items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      config: structuredClone(item.config),
+      active: item.active,
+      status: item.type === "derived" ? "ready" : "stale",
+      response: null,
+      request: null,
+      error: null,
+    }));
+    const largestLane = Math.max(1, ...indicatorState.items.map((item) => Number(item.config.chartLane) || 1));
+    indicatorState.chartCount = Math.min(MAX_CHARTS, Math.max(largestLane, board.chartCount));
+    indicatorState.nextId = Math.max(0, ...indicatorState.items.map((item) => item.id)) + 1;
+    indicatorState.activeBoardId = board.id;
+    indicatorState.selectedDetailId = null;
+    indicatorState.editingId = null;
+    indicatorState.hoverDate = null;
+    indicatorState.draft.chartLane = "1";
+    persistWorkspace();
+    renderBoards();
+    renderScopeFields();
+    renderIndicatorConfig();
+    renderBuilderMode();
+    refreshWorkspacePanels();
+    refreshActiveIndicators();
+  }
+
+  function renderBoards() {
+    const select = $("boardSelect");
+    if (!select) return;
+    const options = indicatorState.boards
+      .map((board) => `<option value="${board.id}">${escapeHtml(board.name)} · ${board.items.length} indicators</option>`)
+      .join("");
+    select.innerHTML = `<option value="">选择一个 board…</option>${options}`;
+    if (indicatorState.activeBoardId !== null) select.value = String(indicatorState.activeBoardId);
+    const active = boardById(indicatorState.activeBoardId);
+    if (active && !$("boardName").value.trim()) $("boardName").value = active.name;
+    $("boardCount").textContent = String(indicatorState.boards.length);
+    $("activeBoardLabel").textContent = active
+      ? `当前 board：${active.name}（保存于 ${active.savedAt.slice(0, 10) || "—"}）`
+      : "当前工作区尚未保存为 board。";
+    renderBoardActions();
+  }
+
+  function renderBoardActions() {
+    $("updateBoardButton").disabled = boardById(indicatorState.activeBoardId) === null;
+    $("deleteBoardButton").disabled = boardById($("boardSelect").value) === null;
+    $("loadBoardButton").disabled = boardById($("boardSelect").value) === null;
   }
 
   function renderIndicatorConfig() {
@@ -258,17 +472,43 @@
   }
 
   function ensureDerivedDefaults(draft) {
-    const ids = indicatorState.items.map((item) => String(item.id));
+    const ids = operandCandidates().map((item) => String(item.id));
     if (!ids.includes(draft.operandA)) draft.operandA = ids[0] || "";
     if (!ids.includes(draft.operandB)) draft.operandB = ids[1] || ids[0] || "";
     if (!Object.hasOwn(OPERATOR_SYMBOLS, draft.operator)) draft.operator = "subtract";
   }
 
+  // While editing a derived indicator its own id — and anything that already reads it —
+  // must stay out of the operand list, otherwise saving would build a reference cycle.
+  function operandCandidates() {
+    if (indicatorState.editingId === null) return indicatorState.items;
+    const blocked = dependencyClosure(indicatorState.editingId);
+    return indicatorState.items.filter((item) => !blocked.has(item.id));
+  }
+
+  function dependencyClosure(id) {
+    const blocked = new Set([Number(id)]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const item of indicatorState.items) {
+        if (item.type !== "derived" || blocked.has(item.id)) continue;
+        const references = [item.config.operandA, item.config.operandB].map(Number);
+        if (references.some((reference) => blocked.has(reference))) {
+          blocked.add(item.id);
+          grew = true;
+        }
+      }
+    }
+    return blocked;
+  }
+
   function derivedOperandFields(draft) {
-    if (!indicatorState.items.length) {
+    const candidates = operandCandidates();
+    if (!candidates.length) {
       return '<div class="system-default-card"><strong>还没有可用的操作数</strong><span>先添加至少一个已保存 indicator，再用它们组合出新指标。</span></div>';
     }
-    const operandOptions = (selected) => indicatorState.items
+    const operandOptions = (selected) => candidates
       .map((item) => `<option value="${item.id}" ${String(item.id) === String(selected) ? "selected" : ""}>${escapeHtml(indicatorLabel(item))}</option>`).join("");
     const operatorOptions = Object.entries(OPERATOR_SYMBOLS)
       .map(([key, symbol]) => `<option value="${key}" ${draft.operator === key ? "selected" : ""}>${symbol}</option>`).join("");
@@ -466,13 +706,19 @@
     renderIndicatorConfig();
   }
 
-  function addIndicator() {
+  // One button drives both paths: it adds a new indicator, or writes the edited
+  // configuration back onto the indicator being edited.
+  function submitIndicator() {
     hideIndicatorFormError();
     try {
       validateScope(indicatorState.draft);
       validateDraft(indicatorState.draft);
     } catch (error) {
       showIndicatorFormError(error.message);
+      return;
+    }
+    if (indicatorState.editingId !== null) {
+      applyIndicatorEdit();
       return;
     }
     const item = {
@@ -488,12 +734,96 @@
     indicatorState.items.push(item);
     persistWorkspace();
     if (item.type === "derived") {
-      refreshWorkspaceViews();
+      refreshWorkspacePanels();
       return;
     }
     indicatorState.selectedDetailId = item.id;
     renderSavedIndicators();
     fetchIndicator(item);
+  }
+
+  function applyIndicatorEdit() {
+    const item = itemById(indicatorState.editingId);
+    if (!item) {
+      indicatorState.editingId = null;
+      renderBuilderMode();
+      return;
+    }
+    item.type = indicatorState.draft.type;
+    item.config = structuredClone(indicatorState.draft);
+    item.status = initialStatus(item.type);
+    item.response = null;
+    item.request = null;
+    item.error = null;
+    indicatorState.editingId = null;
+    persistWorkspace();
+    renderBuilderMode();
+    if (item.type === "derived") {
+      refreshWorkspacePanels();
+      return;
+    }
+    fetchIndicator(item);
+  }
+
+  function startEditing(id) {
+    const item = itemById(id);
+    if (!item) return;
+    hideIndicatorFormError();
+    indicatorState.editingId = item.id;
+    indicatorState.draft = structuredClone(item.config);
+    indicatorState.draft.type = item.type;
+    indicatorState.discovery = null;
+    $("indicatorType").value = item.type;
+    if (item.type !== "derived") $("instrumentCode").value = item.config.instrumentCode;
+    renderScopeFields();
+    renderIndicatorConfig();
+    renderBuilderMode();
+    renderSavedIndicators();
+    $("indicatorBuilder").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function cancelEditing() {
+    indicatorState.editingId = null;
+    hideIndicatorFormError();
+    const draft = defaultDraft($("indicatorType").value);
+    draft.instrumentCode = $("instrumentCode").value.trim();
+    indicatorState.draft = draft;
+    indicatorState.discovery = null;
+    renderScopeFields();
+    renderIndicatorConfig();
+    renderBuilderMode();
+    renderSavedIndicators();
+  }
+
+  function duplicateIndicator(id) {
+    const source = itemById(id);
+    if (!source) return;
+    hideIndicatorFormError();
+    const copy = {
+      id: indicatorState.nextId++,
+      type: source.type,
+      config: structuredClone(source.config),
+      active: source.active,
+      status: initialStatus(source.type),
+      response: null,
+      request: null,
+      error: null,
+    };
+    indicatorState.items.splice(indicatorState.items.indexOf(source) + 1, 0, copy);
+    persistWorkspace();
+    refreshWorkspacePanels({ details: false });
+    if (copy.type !== "derived" && copy.active) fetchIndicator(copy);
+  }
+
+  function renderBuilderMode() {
+    const item = indicatorState.editingId === null ? null : itemById(indicatorState.editingId);
+    if (indicatorState.editingId !== null && !item) indicatorState.editingId = null;
+    const editing = item !== null;
+    $("addIndicatorButton").querySelector("span").textContent = editing ? "保存修改" : "添加并加载指标";
+    $("addIndicatorButton").querySelector("strong").textContent = editing ? "✓" : "＋";
+    $("cancelEditButton").classList.toggle("is-hidden", !editing);
+    $("builderModeNote").classList.toggle("is-hidden", !editing);
+    $("builderModeNote").textContent = editing ? `正在编辑：${indicatorLabel(item)}` : "";
   }
 
   function initialStatus(type) {
@@ -515,6 +845,12 @@
       const right = itemById(draft.operandB);
       if (!left || !right) throw new Error("请选择两个已保存的 indicator 作为操作数。");
       if (!Object.hasOwn(OPERATOR_SYMBOLS, draft.operator)) throw new Error("请选择合法的运算符。");
+      if (indicatorState.editingId !== null) {
+        const blocked = dependencyClosure(indicatorState.editingId);
+        if (blocked.has(left.id) || blocked.has(right.id)) {
+          throw new Error("运算指标不能引用自己，也不能引用依赖它的指标。");
+        }
+      }
       return;
     }
     if (["implied_vol", "forward"].includes(draft.type)) {
@@ -599,12 +935,12 @@
   async function fetchIndicator(item) {
     if (!item.active || !indicatorState.items.some((candidate) => candidate.id === item.id)) return;
     if (item.type === "derived") {
-      refreshWorkspaceViews();
+      refreshWorkspacePanels();
       return;
     }
     item.status = "loading";
     item.error = null;
-    refreshWorkspaceViews();
+    refreshWorkspacePanels();
     const started = performance.now();
     try {
       validateScope(item.config);
@@ -630,14 +966,14 @@
       item.error = error.payload?.message || error.message || "指标加载失败";
       item.response = null;
     }
-    refreshWorkspaceViews();
+    refreshWorkspacePanels();
   }
 
   async function refreshActiveIndicators() {
     hideIndicatorFormError();
     const fetchable = indicatorState.items.filter((item) => item.active && item.type !== "derived");
     await Promise.all(fetchable.map(fetchIndicator));
-    refreshWorkspaceViews();
+    refreshWorkspacePanels();
   }
 
   function invalidateIndicators() {
@@ -649,12 +985,12 @@
       item.error = null;
     }
     persistWorkspace();
-    refreshWorkspaceViews();
+    refreshWorkspacePanels();
   }
 
   // Every view reads from one recomputed series index so derived indicators, the chart
   // stack, the cross-chart readout and the statistics table can never drift apart.
-  function refreshWorkspaceViews({ details = true } = {}) {
+  function refreshWorkspacePanels({ details = true } = {}) {
     refreshSeriesIndex();
     renderSavedIndicators();
     renderIndicatorChart();
@@ -749,7 +1085,7 @@
       if (!item) return;
       item.config.chartLane = laneSelect.value;
       persistWorkspace();
-      refreshWorkspaceViews({ details: false });
+      refreshWorkspacePanels({ details: false });
       return;
     }
     const toggle = event.target.closest("[data-indicator-toggle]");
@@ -758,7 +1094,7 @@
     if (!item) return;
     item.active = toggle.checked;
     persistWorkspace();
-    refreshWorkspaceViews({ details: false });
+    refreshWorkspacePanels({ details: false });
     if (item.active && item.type !== "derived" && !item.response) fetchIndicator(item);
   }
 
@@ -768,7 +1104,7 @@
     indicatorState.draft.chartLane = String(indicatorState.chartCount);
     persistWorkspace();
     renderScopeFields();
-    refreshWorkspaceViews({ details: false });
+    refreshWorkspacePanels({ details: false });
   }
 
   function handleChartStackClick(event) {
@@ -789,7 +1125,7 @@
     else if (draftLane === lane) indicatorState.draft.chartLane = String(Math.min(lane, indicatorState.chartCount));
     persistWorkspace();
     renderScopeFields();
-    refreshWorkspaceViews({ details: false });
+    refreshWorkspacePanels({ details: false });
   }
 
   function handleSavedIndicatorClick(event) {
@@ -801,6 +1137,10 @@
       $("resultWorkspace").scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
+    const editButton = event.target.closest("[data-indicator-edit]");
+    if (editButton) return startEditing(Number(editButton.dataset.indicatorEdit));
+    const duplicateButton = event.target.closest("[data-indicator-duplicate]");
+    if (duplicateButton) return duplicateIndicator(Number(duplicateButton.dataset.indicatorDuplicate));
     const deleteButton = event.target.closest("[data-indicator-delete]");
     if (!deleteButton) return;
     const deletedId = Number(deleteButton.dataset.indicatorDelete);
@@ -814,7 +1154,7 @@
     indicatorState.items = indicatorState.items.filter((item) => item.id !== deletedId);
     if (indicatorState.selectedDetailId === deletedId) indicatorState.selectedDetailId = null;
     persistWorkspace();
-    refreshWorkspaceViews();
+    refreshWorkspacePanels();
   }
 
   function renderSavedIndicators() {
@@ -825,11 +1165,22 @@
       return;
     }
     const laneOptions = (selected) => Array.from({ length: indicatorState.chartCount }, (_, index) => index + 1).map((lane) => `<option value="${lane}" ${String(lane) === String(selected) ? "selected" : ""}>坐标 ${lane}</option>`).join("");
-    $("savedIndicators").innerHTML = indicatorState.items.map((item) => `<article class="saved-indicator ${item.active ? "is-active" : ""}">
+    $("savedIndicators").innerHTML = indicatorState.items.map((item) => {
+      const label = escapeHtml(indicatorLabel(item));
+      return `<article class="saved-indicator ${item.active ? "is-active" : ""} ${item.id === indicatorState.editingId ? "is-editing" : ""}">
       <label class="indicator-toggle"><input type="checkbox" data-indicator-toggle="${item.id}" ${item.active ? "checked" : ""}/><span aria-hidden="true"></span></label>
-      <div class="saved-indicator-copy"><strong>${escapeHtml(indicatorLabel(item))}</strong><small>${escapeHtml(indicatorDetail(item))}</small><em class="indicator-status status-${item.status}">${escapeHtml(indicatorStatus(item))}</em>${item.error ? `<p>${escapeHtml(item.error)}</p>` : ""}</div>
-      <div class="saved-indicator-actions"><select class="indicator-lane-select" data-indicator-lane="${item.id}" aria-label="${escapeHtml(indicatorLabel(item))} 所属坐标">${laneOptions(item.config.chartLane)}</select><button class="view-indicator-detail" type="button" data-indicator-detail="${item.id}" ${item.response ? "" : "disabled"}>查看详情</button><button class="delete-indicator" type="button" data-indicator-delete="${item.id}" aria-label="删除 ${escapeHtml(indicatorLabel(item))}">×</button></div>
-    </article>`).join("");
+      <div class="saved-indicator-copy"><strong>${label}</strong><small>${escapeHtml(indicatorDetail(item))}</small><em class="indicator-status status-${item.status}">${escapeHtml(indicatorStatus(item))}</em>${item.error ? `<p>${escapeHtml(item.error)}</p>` : ""}</div>
+      <div class="saved-indicator-actions">
+        <select class="indicator-lane-select" data-indicator-lane="${item.id}" aria-label="${label} 所属坐标">${laneOptions(item.config.chartLane)}</select>
+        <div class="saved-indicator-buttons">
+          <button class="card-action" type="button" data-indicator-edit="${item.id}" aria-label="编辑 ${label}">编辑</button>
+          <button class="card-action" type="button" data-indicator-duplicate="${item.id}" aria-label="复制 ${label}">复制</button>
+          <button class="card-action" type="button" data-indicator-detail="${item.id}" ${item.response ? "" : "disabled"} aria-label="查看 ${label} 详情">详情</button>
+        </div>
+        <button class="delete-indicator" type="button" data-indicator-delete="${item.id}" aria-label="删除 ${label}">×</button>
+      </div>
+    </article>`;
+    }).join("");
   }
 
   // Keeps the derived operand dropdowns in step with the saved list without re-rendering
@@ -1231,27 +1582,151 @@
     };
   }
 
+  // ------------------------------------------------------- range statistics table
+
+  function restoreStatsColumns() {
+    let stored = [];
+    try {
+      const raw = JSON.parse(localStorage.getItem(STATS_STORAGE_KEY) || "null");
+      if (raw?.version === 1 && Array.isArray(raw.columns)) stored = raw.columns;
+    } catch (error) {
+      showIndicatorFormError(`无法读取统计列设置：${error.message}`);
+    }
+    const known = new Map(STAT_COLUMNS.map((column) => [column.id, column]));
+    const ordered = [];
+    const seen = new Set();
+    for (const entry of stored) {
+      if (!known.has(entry?.id) || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      ordered.push({ id: entry.id, visible: entry.visible !== false });
+    }
+    // Columns added after the user saved their layout appear at the end, visible.
+    for (const column of STAT_COLUMNS) {
+      if (!seen.has(column.id)) ordered.push({ id: column.id, visible: true });
+    }
+    indicatorState.statsColumns = ordered;
+  }
+
+  function persistStatsColumns() {
+    try {
+      localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify({ version: 1, columns: indicatorState.statsColumns }));
+    } catch (error) {
+      showIndicatorFormError(`浏览器无法保存统计列设置：${error.message}`);
+    }
+  }
+
+  function visibleStatsColumns() {
+    const known = new Map(STAT_COLUMNS.map((column) => [column.id, column]));
+    return indicatorState.statsColumns.filter((entry) => entry.visible).map((entry) => known.get(entry.id));
+  }
+
+  function bindStatsColumnControls() {
+    $("statsColumnList").addEventListener("change", (event) => {
+      const toggle = event.target.closest("[data-column-toggle]");
+      if (!toggle) return;
+      const entry = indicatorState.statsColumns.find((column) => column.id === toggle.dataset.columnToggle);
+      if (!entry) return;
+      entry.visible = toggle.checked;
+      persistStatsColumns();
+      renderStatsColumnConfig();
+      renderIndicatorStats();
+    });
+    $("statsColumnList").addEventListener("click", (event) => {
+      const move = event.target.closest("[data-column-move]");
+      if (!move) return;
+      const index = indicatorState.statsColumns.findIndex((column) => column.id === move.dataset.columnId);
+      const target = move.dataset.columnMove === "up" ? index - 1 : index + 1;
+      if (index < 0 || target < 0 || target >= indicatorState.statsColumns.length) return;
+      const columns = indicatorState.statsColumns;
+      [columns[index], columns[target]] = [columns[target], columns[index]];
+      persistStatsColumns();
+      renderStatsColumnConfig();
+      renderIndicatorStats();
+    });
+    $("statsColumnsResetButton").addEventListener("click", () => {
+      indicatorState.statsColumns = STAT_COLUMNS.map((column) => ({ id: column.id, visible: true }));
+      persistStatsColumns();
+      renderStatsColumnConfig();
+      renderIndicatorStats();
+    });
+  }
+
+  function renderStatsColumnConfig() {
+    const list = $("statsColumnList");
+    if (!list) return;
+    const known = new Map(STAT_COLUMNS.map((column) => [column.id, column]));
+    list.innerHTML = indicatorState.statsColumns.map((entry, index) => {
+      const column = known.get(entry.id);
+      return `<div class="stats-column-row">
+        <label><input type="checkbox" data-column-toggle="${entry.id}" ${entry.visible ? "checked" : ""} /><span>${escapeHtml(column.label)}</span></label>
+        <span class="stats-column-move">
+          <button type="button" data-column-move="up" data-column-id="${entry.id}" ${index === 0 ? "disabled" : ""} aria-label="上移 ${escapeHtml(column.label)}">↑</button>
+          <button type="button" data-column-move="down" data-column-id="${entry.id}" ${index === indicatorState.statsColumns.length - 1 ? "disabled" : ""} aria-label="下移 ${escapeHtml(column.label)}">↓</button>
+        </span>
+      </div>`;
+    }).join("");
+    const shown = indicatorState.statsColumns.filter((entry) => entry.visible).length;
+    $("statsColumnSummary").textContent = `列设置 · ${shown}/${indicatorState.statsColumns.length}`;
+  }
+
   function renderIndicatorStats() {
     const body = $("indicatorStatsBody");
     if (!body) return;
-    const headers = ["Indicator", "坐标", "观测数", "最新值", "最新日期", "最小", "最大", "平均", "中位数", "标准差", "最新值百分位"];
+    const columns = visibleStatsColumns();
+    const headers = ["Indicator", ...columns.map((column) => column.label)];
     $("indicatorStatsHead").innerHTML = `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
     const active = indicatorState.items.filter((item) => item.active);
     const rows = active.map((item) => {
       const entry = indicatorState.seriesIndex.get(item.id);
       const stats = summarizeSeries(entry?.points);
-      const head = `<td>${escapeHtml(indicatorLabel(item))}</td><td>${escapeHtml(item.config.chartLane)}</td>`;
+      const name = `<td class="stats-name">${escapeHtml(indicatorLabel(item))}</td>`;
       if (!stats) {
-        return `<tr>${head}<td colspan="9" class="cell-missing">${escapeHtml(entry?.error || "当前范围内没有有效值")}</td></tr>`;
+        const message = escapeHtml(entry?.error || "当前范围内没有有效值");
+        return `<tr>${name}<td colspan="${Math.max(columns.length, 1)}" class="cell-missing">${message}</td></tr>`;
       }
-      const suffix = unitSuffix(item);
-      const cell = (value, digits = 3) => `<td>${escapeHtml(`${formatNumber(value, digits)}${suffix}`)}</td>`;
-      return `<tr>${head}<td>${formatNumber(stats.count, 0)}</td>${cell(stats.latest)}<td>${escapeHtml(stats.latestDate)}</td>
-        ${cell(stats.min)}${cell(stats.max)}${cell(stats.mean)}${cell(stats.median)}${cell(stats.stdDev)}
-        <td>${escapeHtml(`${formatNumber(stats.percentile, 1)}%`)}</td></tr>`;
+      return `<tr>${name}${columns.map((column) => statCell(column, item, stats)).join("")}</tr>`;
     });
     body.innerHTML = rows.join("") || `<tr><td colspan="${headers.length}" class="cell-missing">没有启用中的 indicator。</td></tr>`;
     $("indicatorStatsCount").textContent = `${active.length} series`;
+  }
+
+  function statCell(column, item, stats) {
+    if (column.id === "lane") return `<td>坐标 ${escapeHtml(item.config.chartLane)}</td>`;
+    const value = stats[column.id];
+    if (column.kind === "text") return `<td>${escapeHtml(value ?? "—")}</td>`;
+    if (column.kind === "count") return `<td>${escapeHtml(formatNumber(value, 0))}</td>`;
+    if (column.kind === "percentile") {
+      if (value === null || value === undefined) return '<td class="cell-missing">—</td>';
+      return `<td class="pct-cell ${percentileBucket(value)}">${escapeHtml(formatFixed(value, 1))}%</td>`;
+    }
+    if (value === null || value === undefined) return '<td class="cell-missing">—</td>';
+    // Ratios (z-score, skew, kurtosis, autocorrelation) are unitless by construction.
+    if (column.kind === "ratio") return `<td class="stat-number">${escapeHtml(formatFixed(value, 2))}</td>`;
+    const text = `${formatFixed(value, valueDigits(item))}${unitSuffix(item)}`;
+    const sign = column.kind === "signed" && value !== 0 ? (value > 0 ? " stat-up" : " stat-down") : "";
+    const prefix = column.kind === "signed" && value > 0 ? "+" : "";
+    return `<td class="stat-number${sign}">${escapeHtml(`${prefix}${text}`)}</td>`;
+  }
+
+  // Statistics columns keep a fixed decimal count so the numbers stay column-aligned,
+  // unlike formatNumber which drops trailing zeros.
+  function formatFixed(value, digits) {
+    return new Intl.NumberFormat("zh-HK", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+  }
+
+  // Volatility reads best at one decimal; prices need two and ratios three.
+  function valueDigits(item) {
+    const unit = indicatorUnit(item);
+    if (unit === "vol") return 1;
+    return unit === "price" ? 2 : 3;
+  }
+
+  function percentileBucket(value) {
+    if (value >= 80) return "pct-high";
+    if (value >= 60) return "pct-mid-high";
+    if (value > 40) return "pct-mid";
+    if (value > 20) return "pct-mid-low";
+    return "pct-low";
   }
 
   function summarizeSeries(points) {
@@ -1263,23 +1738,86 @@
     const values = usable.map((point) => point.value);
     const sorted = [...values].sort((left, right) => left - right);
     const count = values.length;
-    const mean = values.reduce((sum, value) => sum + value, 0) / count;
+    const mean = average(values);
     const variance = count > 1
       ? values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (count - 1)
       : 0;
+    const stdDev = Math.sqrt(variance);
     const latest = usable.at(-1);
-    const middle = Math.floor(count / 2);
+    const min = sorted[0];
+    const max = sorted.at(-1);
+    const steps = values.slice(1).map((value, index) => value - values[index]);
     return {
       count,
-      min: sorted[0],
-      max: sorted.at(-1),
-      mean,
-      median: count % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
-      stdDev: Math.sqrt(variance),
       latest: latest.value,
       latestDate: latest.date,
+      min,
+      max,
+      range: max - min,
+      minDate: usable.find((point) => point.value === min).date,
+      maxDate: usable.find((point) => point.value === max).date,
+      mean,
+      mean20: average(values.slice(-20)),
+      median: quantile(sorted, 0.5),
+      stdDev,
+      iqr: quantile(sorted, 0.75) - quantile(sorted, 0.25),
       percentile: (sorted.filter((value) => value <= latest.value).length / count) * 100,
+      zScore: stdDev > 0 ? (latest.value - mean) / stdDev : null,
+      change1: changeOverSessions(values, 1),
+      change5: changeOverSessions(values, 5),
+      change20: changeOverSessions(values, 20),
+      largestGain: steps.length ? steps.reduce((best, step) => Math.max(best, step), -Infinity) : null,
+      largestDrop: steps.length ? steps.reduce((best, step) => Math.min(best, step), Infinity) : null,
+      skewness: sampleSkewness(values, mean, stdDev),
+      kurtosis: sampleKurtosis(values, mean, stdDev),
+      autocorrelation: lagOneAutocorrelation(values, mean),
     };
+  }
+
+  function average(values) {
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  }
+
+  function quantile(sorted, fraction) {
+    if (sorted.length === 1) return sorted[0];
+    const position = (sorted.length - 1) * fraction;
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    if (lower === upper) return sorted[lower];
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+  }
+
+  // Lags count usable observations, so a gap in the series never silently shifts the
+  // comparison onto a different trading day.
+  function changeOverSessions(values, lag) {
+    return values.length > lag ? values.at(-1) - values.at(-1 - lag) : null;
+  }
+
+  function sampleSkewness(values, mean, stdDev) {
+    const count = values.length;
+    if (count < 3 || !(stdDev > 0)) return null;
+    const sum = values.reduce((total, value) => total + ((value - mean) / stdDev) ** 3, 0);
+    return (count / ((count - 1) * (count - 2))) * sum;
+  }
+
+  function sampleKurtosis(values, mean, stdDev) {
+    const count = values.length;
+    if (count < 4 || !(stdDev > 0)) return null;
+    const sum = values.reduce((total, value) => total + ((value - mean) / stdDev) ** 4, 0);
+    return ((count * (count + 1)) / ((count - 1) * (count - 2) * (count - 3))) * sum
+      - (3 * (count - 1) ** 2) / ((count - 2) * (count - 3));
+  }
+
+  function lagOneAutocorrelation(values, mean) {
+    if (values.length < 3) return null;
+    let numerator = 0;
+    let denominator = 0;
+    for (let index = 0; index < values.length; index += 1) {
+      const centered = values[index] - mean;
+      denominator += centered * centered;
+      if (index > 0) numerator += centered * (values[index - 1] - mean);
+    }
+    return denominator > 0 ? numerator / denominator : null;
   }
 
   function renderIndicatorWarnings(active) {

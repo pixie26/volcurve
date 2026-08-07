@@ -235,6 +235,73 @@ def test_saved_indicators_can_be_combined_with_arithmetic_operators():
     assert "请先删除这些运算指标" in javascript
 
 
+def test_saved_indicators_can_be_edited_and_duplicated():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'id="cancelEditButton"' in html
+    assert 'id="builderModeNote"' in html
+    assert "data-indicator-edit" in javascript
+    assert "data-indicator-duplicate" in javascript
+    assert "function startEditing" in javascript
+    assert "function duplicateIndicator" in javascript
+    # Saving an edit rewrites the item in place and re-requests it.
+    apply_edit = javascript.split("function applyIndicatorEdit", 1)[1].split("function startEditing", 1)[0]
+    assert "item.config = structuredClone(indicatorState.draft)" in apply_edit
+    assert "item.response = null" in apply_edit
+    # Editing a derived indicator must not be able to build a reference cycle.
+    assert "function dependencyClosure" in javascript
+    assert "function operandCandidates" in javascript
+    assert "运算指标不能引用自己" in javascript
+
+
+def test_boards_reload_saved_indicator_sets_with_fresh_data():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    for element in ("boardSelect", "boardName", "saveBoardAsButton", "updateBoardButton",
+                    "deleteBoardButton", "loadBoardButton", "activeBoardLabel"):
+        assert f'id="{element}"' in html
+    assert 'BOARD_STORAGE_KEY = "volcurve.compare.boards.v1"' in javascript
+
+    open_board = javascript.split("function openBoard", 1)[1].split("function renderBoards", 1)[0]
+    # A board restores configuration only, then re-requests every active indicator.
+    assert "refreshActiveIndicators()" in open_board
+    assert 'status: item.type === "derived" ? "ready" : "stale"' in open_board
+    assert "response: null" in open_board
+    snapshot = javascript.split("function currentBoardSnapshot", 1)[1].split("function saveBoardAs", 1)[0]
+    assert "serializeItem" in snapshot
+    assert "startDate" in snapshot and "chartCount" in snapshot
+
+
+def test_statistics_columns_are_configurable_and_cover_the_full_metric_set():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'id="statsColumnList"' in html
+    assert 'id="statsColumnsResetButton"' in html
+    assert 'STATS_STORAGE_KEY = "volcurve.compare.statscolumns.v1"' in javascript
+
+    columns = javascript.split("const STAT_COLUMNS = [", 1)[1].split("];", 1)[0]
+    for metric in ("zScore", "change5", "change20", "iqr", "maxDate", "minDate",
+                   "largestGain", "largestDrop", "skewness", "kurtosis", "mean20",
+                   "autocorrelation", "percentile", "range"):
+        assert f'id: "{metric}"' in columns
+
+    restore = javascript.split("function restoreStatsColumns", 1)[1].split("function persistStatsColumns", 1)[0]
+    # Columns added in a later release must not disappear for users with a saved layout.
+    assert "if (!seen.has(column.id)) ordered.push({ id: column.id, visible: true })" in restore
+
+    # Volatility renders at one decimal; percentiles are bucketed for colour.
+    digits = javascript.split("function valueDigits", 1)[1].split("function percentileBucket", 1)[0]
+    assert 'if (unit === "vol") return 1;' in digits
+    assert "function percentileBucket" in javascript
+    assert "pct-high" in javascript and "pct-low" in javascript
+
+
 def test_statistics_table_summarizes_every_displayed_indicator():
     with TestClient(app) as client:
         html = client.get("/").text
@@ -243,9 +310,9 @@ def test_statistics_table_summarizes_every_displayed_indicator():
     assert 'id="indicatorStatsBody"' in html
     assert 'id="indicatorStatsHead"' in html
     assert "renderIndicatorStats" in javascript
-    statistics = javascript.split("function renderIndicatorStats", 1)[1].split("function summarizeSeries", 1)[0]
+    columns = javascript.split("const STAT_COLUMNS = [", 1)[1].split("];", 1)[0]
     for column in ("观测数", "最新值", "最小", "最大", "平均", "中位数", "标准差", "最新值百分位"):
-        assert column in statistics
+        assert column in columns
     summarize = javascript.split("function summarizeSeries", 1)[1]
     # Statistics skip missing points instead of filling them in.
     assert "point.value !== null && point.value !== undefined" in summarize
