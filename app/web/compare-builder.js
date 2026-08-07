@@ -28,6 +28,10 @@
     dragSource: null,
     dateMode: "sliding",
     slidingWindow: "1Y",
+    // Bulk selection is an editing affordance, not part of the workspace: it is deliberately
+    // never persisted, so reopening the page or loading a board never restores a stale one.
+    bulkMode: false,
+    bulkSelection: new Set(),
   };
 
   // A sliding range is re-derived from today every time the workspace or a board opens,
@@ -147,6 +151,10 @@
     $("cancelEditButton").addEventListener("click", cancelEditing);
     $("refreshIndicatorsButton").addEventListener("click", () => refreshActiveIndicators());
     $("forceRefreshIndicatorsButton").addEventListener("click", forceRefreshActiveIndicators);
+    $("bulkModeButton").addEventListener("click", () => toggleBulkMode());
+    $("bulkMoveButton").addEventListener("click", () => applyBulkInstrument({ copy: false }));
+    $("bulkCopyButton").addEventListener("click", () => applyBulkInstrument({ copy: true }));
+    $("bulkBar").addEventListener("click", handleBulkBarClick);
     $("addChartButton").addEventListener("click", addChartLane);
     $("indicatorCharts").addEventListener("click", handleChartStackClick);
     $("savedIndicators").addEventListener("change", handleSavedIndicatorChange);
@@ -628,6 +636,9 @@
     indicatorState.editingId = null;
     indicatorState.hoverDate = null;
     indicatorState.draft.chartLane = "1";
+    // Ids are reused across boards, so a carried-over selection would point at the wrong
+    // indicators entirely.
+    if (indicatorState.bulkMode) toggleBulkMode(false);
     indicatorState.columnWidths = { ...board.columnWidths };
     persistWorkspace();
     renderBoards();
@@ -1037,6 +1048,165 @@
     if (copy.type !== "derived" && copy.active) fetchIndicator(copy);
   }
 
+  // ------------------------------------------------------------- bulk editing
+
+  function toggleBulkMode(on) {
+    indicatorState.bulkMode = on ?? !indicatorState.bulkMode;
+    indicatorState.bulkSelection = new Set();
+    hideIndicatorFormError();
+    setBulkNote("");
+    $("bulkBar").classList.toggle("is-hidden", !indicatorState.bulkMode);
+    $("bulkModeButton").classList.toggle("is-on", indicatorState.bulkMode);
+    renderSavedIndicators();
+  }
+
+  // A derived indicator has no instrument code of its own, so changing "its" underlying can
+  // only mean changing the underlyings it is computed from. Selecting one therefore pulls in
+  // its whole operand tree, and those operands show as ticked and locked rather than being
+  // changed behind your back.
+  function bulkTargetIds() {
+    const selected = new Set(indicatorState.bulkSelection);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const item of indicatorState.items) {
+        if (item.type !== "derived" || !selected.has(item.id)) continue;
+        for (const reference of [item.config.operandA, item.config.operandB]) {
+          const operand = itemById(reference);
+          if (operand && !selected.has(operand.id)) {
+            selected.add(operand.id);
+            grew = true;
+          }
+        }
+      }
+    }
+    return selected;
+  }
+
+  function setBulkSelection(id, selected) {
+    if (selected) indicatorState.bulkSelection.add(id);
+    else indicatorState.bulkSelection.delete(id);
+    setBulkNote("");
+    renderSavedIndicators();
+  }
+
+  function renderBulkBar() {
+    if (!indicatorState.bulkMode) return;
+    const targets = bulkTargetIds();
+    const pulled = targets.size - indicatorState.bulkSelection.size;
+    $("bulkCount").textContent = pulled
+      ? `已选 ${indicatorState.bulkSelection.size} 项（含运算指标带入的 ${pulled} 个操作数，共 ${targets.size} 项）`
+      : `已选 ${targets.size} 项`;
+  }
+
+  function setBulkNote(message, tone = "") {
+    const note = $("bulkNote");
+    if (!note) return;
+    note.textContent = message;
+    note.className = `bulk-note ${tone}`.trim();
+  }
+
+  // What identifies an indicator as a series: not its name, and not which lane it sits in.
+  function coordinateSignature(item) {
+    const config = { ...item.config };
+    delete config.alias;
+    delete config.chartLane;
+    return stableStringify({ type: item.type, config });
+  }
+
+  function applyBulkInstrument({ copy }) {
+    hideIndicatorFormError();
+    const code = $("bulkInstrumentCode").value.trim();
+    if (!code) return setBulkNote("请先填写目标 instrument code。", "is-error");
+    const targets = indicatorState.items.filter((item) => bulkTargetIds().has(item.id));
+    const repointable = targets.filter((item) => item.type !== "derived");
+    if (!repointable.length) {
+      return setBulkNote("所选项里没有可以改标的的基础指标。", "is-error");
+    }
+    const outcome = copy ? bulkCopy(targets, code) : bulkMove(repointable, code);
+    persistWorkspace();
+    refreshWorkspacePanels();
+    // Everything touched had its response cleared, so this reloads exactly those. Indicators
+    // sharing a coordinate collapse into one upstream call.
+    fetchMissingDependencies();
+    setBulkNote(outcome);
+  }
+
+  function bulkMove(repointable, code) {
+    const renamed = repointable.filter((item) => indicatorAlias(item)).length;
+    for (const item of repointable) {
+      item.config.instrumentCode = code;
+      item.status = initialStatus(item.type);
+      item.response = null;
+      item.request = null;
+      item.error = null;
+    }
+    const notes = [`已把 ${repointable.length} 个指标换成 ${code}。`];
+    if (renamed) notes.push(`其中 ${renamed} 个保留了原有别名，如不再合适请双击列头改名。`);
+    notes.push(...duplicateWarning(repointable));
+    return notes.join("");
+  }
+
+  function bulkCopy(targets, code) {
+    // Copies are built first and rewired second, so a copied combination reads from the
+    // copied operands instead of silently staying pointed at the originals.
+    const idMap = new Map();
+    const copies = targets.map((source) => {
+      const copy = {
+        id: indicatorState.nextId++,
+        type: source.type,
+        config: structuredClone(source.config),
+        active: source.active,
+        status: initialStatus(source.type),
+        response: null,
+        request: null,
+        error: null,
+      };
+      // An identical alias on both would make the copy indistinguishable from its source;
+      // falling back to the technical label at least names the new underlying.
+      copy.config.alias = "";
+      if (copy.type !== "derived") copy.config.instrumentCode = code;
+      idMap.set(source.id, copy.id);
+      return copy;
+    });
+    for (const copy of copies) {
+      if (copy.type !== "derived") continue;
+      for (const key of ["operandA", "operandB"]) {
+        const mapped = idMap.get(Number(copy.config[key]));
+        if (mapped !== undefined) copy.config[key] = mapped;
+      }
+    }
+    indicatorState.items.push(...copies);
+    const derived = copies.filter((copy) => copy.type === "derived").length;
+    const notes = [`已按 ${code} 复制出 ${copies.length} 个指标${derived ? `（含 ${derived} 个运算指标，已接到复制出的操作数上）` : ""}。`];
+    notes.push(...duplicateWarning(copies));
+    return notes.join("");
+  }
+
+  function handleBulkBarClick(event) {
+    if (event.target.closest("[data-bulk-exit]")) return toggleBulkMode(false);
+    if (event.target.closest("[data-bulk-none]")) {
+      indicatorState.bulkSelection = new Set();
+      setBulkNote("");
+      return renderSavedIndicators();
+    }
+    if (!event.target.closest("[data-bulk-all]")) return;
+    // Selecting every base indicator, not every indicator: a combination would only pull
+    // its operands back in, which are already here.
+    indicatorState.bulkSelection = new Set(
+      indicatorState.items.filter((item) => item.type !== "derived").map((item) => item.id)
+    );
+    setBulkNote("");
+    renderSavedIndicators();
+  }
+
+  function duplicateWarning(changed) {
+    const changedIds = new Set(changed.map((item) => item.id));
+    const others = indicatorState.items.filter((item) => !changedIds.has(item.id)).map(coordinateSignature);
+    const clashes = changed.filter((item) => others.includes(coordinateSignature(item))).length;
+    return clashes ? [`有 ${clashes} 个与已存在的指标坐标完全相同，图上会出现重合的线。`] : [];
+  }
+
   function renderBuilderMode() {
     const item = indicatorState.editingId === null ? null : itemById(indicatorState.editingId);
     if (indicatorState.editingId !== null && !item) indicatorState.editingId = null;
@@ -1355,6 +1525,8 @@
   }
 
   function handleSavedIndicatorChange(event) {
+    const bulkBox = event.target.closest("[data-bulk-select]");
+    if (bulkBox) return setBulkSelection(Number(bulkBox.dataset.bulkSelect), bulkBox.checked);
     const laneSelect = event.target.closest("[data-indicator-lane]");
     if (laneSelect) {
       const item = indicatorState.items.find((candidate) => candidate.id === Number(laneSelect.dataset.indicatorLane));
@@ -1437,14 +1609,26 @@
   function renderSavedIndicators() {
     $("indicatorCount").textContent = String(indicatorState.items.length);
     syncDerivedOperandOptions();
+    // A deleted indicator must not linger in the selection and silently rejoin a bulk edit.
+    for (const id of indicatorState.bulkSelection) {
+      if (!itemById(id)) indicatorState.bulkSelection.delete(id);
+    }
+    renderBulkBar();
     if (!indicatorState.items.length) {
       $("savedIndicators").innerHTML = '<p class="empty-list-copy">尚未添加指标。</p>';
       return;
     }
+    const bulkTargets = indicatorState.bulkMode ? bulkTargetIds() : new Set();
     const laneOptions = (selected) => Array.from({ length: indicatorState.chartCount }, (_, index) => index + 1).map((lane) => `<option value="${lane}" ${String(lane) === String(selected) ? "selected" : ""}>坐标 ${lane}</option>`).join("");
     $("savedIndicators").innerHTML = indicatorState.items.map((item) => {
       const label = escapeHtml(indicatorLabel(item));
-      return `<article class="saved-indicator ${item.active ? "is-active" : ""} ${item.id === indicatorState.editingId ? "is-editing" : ""}">
+      const picked = bulkTargets.has(item.id);
+      const locked = picked && !indicatorState.bulkSelection.has(item.id);
+      const bulkBox = indicatorState.bulkMode
+        ? `<label class="bulk-select ${locked ? "is-locked" : ""}" title="${locked ? "由选中的运算指标带入，取消它即可解除" : "选中以参与批量操作"}"><input type="checkbox" data-bulk-select="${item.id}" ${picked ? "checked" : ""} ${locked ? "disabled" : ""} aria-label="批量选择 ${label}"/></label>`
+        : "";
+      return `<article class="saved-indicator ${item.active ? "is-active" : ""} ${item.id === indicatorState.editingId ? "is-editing" : ""} ${indicatorState.bulkMode ? "is-bulk" : ""} ${picked ? "is-bulk-picked" : ""}">
+      ${bulkBox}
       <label class="indicator-toggle"><input type="checkbox" data-indicator-toggle="${item.id}" ${item.active ? "checked" : ""}/><span aria-hidden="true"></span></label>
       <div class="saved-indicator-copy"><strong>${label}</strong><small>${escapeHtml(indicatorDetail(item))}</small><em class="indicator-status status-${item.status}">${escapeHtml(indicatorStatus(item))}</em>${item.error ? `<p>${escapeHtml(item.error)}</p>` : ""}</div>
       <div class="saved-indicator-actions">

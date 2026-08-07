@@ -585,3 +585,45 @@ def test_a_narrower_range_is_reused_and_a_force_refresh_can_bypass_it():
     assert "forceRefresh" not in javascript.split("function buildIndicatorRequest", 1)[1].split(
         "function coordinateRequest", 1
     )[0]
+
+
+def test_several_indicators_can_be_repointed_at_another_underlying_at_once():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    for control in ("bulkModeButton", "bulkInstrumentCode", "bulkMoveButton", "bulkCopyButton"):
+        assert f'id="{control}"' in html, control
+    assert "换成此标的" in html and "复制为此标的" in html
+
+    # Changing one operand at a time leaves a combination straddling two underlyings, so a
+    # selected combination brings its whole operand tree with it.
+    closure = javascript.split("function bulkTargetIds", 1)[1].split("function setBulkSelection", 1)[0]
+    assert "item.config.operandA, item.config.operandB" in closure
+    # Operands pulled in this way are shown ticked and locked rather than changed silently.
+    box = javascript.split("const bulkBox =", 1)[1].split("return `<article", 1)[0]
+    assert "locked ? \"is-locked\"" in box and 'locked ? "disabled" : ""' in box
+
+    # The selection is transient; it must never reach localStorage.
+    persist = javascript.split("function persistWorkspace", 1)[1].split("function ", 1)[0]
+    assert "bulkSelection" not in persist and "bulkMode" not in persist
+
+
+def test_copying_a_combination_to_another_underlying_rewires_it_to_the_copies():
+    with TestClient(app) as client:
+        javascript = client.get("/static/compare-builder.js").text
+
+    copy = javascript.split("function bulkCopy", 1)[1].split("function duplicateWarning", 1)[0]
+    # Without the id map the copied combination stays pointed at the original operands and
+    # silently reproduces the cross-underlying mix the feature exists to prevent.
+    assert "idMap.set(source.id, copy.id)" in copy
+    assert 'for (const key of ["operandA", "operandB"])' in copy
+    assert "idMap.get(Number(copy.config[key]))" in copy
+    # A copy carrying the source's alias would be indistinguishable from it.
+    assert 'copy.config.alias = ""' in copy
+    assert 'if (copy.type !== "derived") copy.config.instrumentCode = code;' in copy
+
+    move = javascript.split("function bulkMove", 1)[1].split("function bulkCopy", 1)[0]
+    # A move keeps the card's own name but says so, since the name may no longer fit.
+    assert "保留了原有别名" in move
+    assert "item.response = null" in move

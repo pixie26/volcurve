@@ -83,7 +83,7 @@
                 <button id="instrumentSearchButton" class="icon-button" type="button" title="搜索标的">⌕</button>
               </div>
               <div id="instrumentResults" class="instrument-results is-hidden" role="listbox" aria-label="搜索结果"></div>
-              <small id="instrumentHelp">输入代码或名称后按 Enter 或点 ⌕ 搜索，再从结果里点选。新 indicator 直接使用此标的；已保存 indicator 保留自己的标的。当前 catalogue 仅 equity。</small>
+              <small id="instrumentHelp">输入代码或名称后按 Enter 或点 ⌕ 搜索，再从结果里点选。新 indicator 直接使用此标的；已保存 indicator 保留自己的标的，要整批换标的请用下方「批量」。当前 catalogue 仅 equity。</small>
             </label>
             <label id="chartLaneField" class="field field-wide">
               <span>放到哪个坐标</span>
@@ -110,7 +110,19 @@
             <div id="indicatorFormError" class="form-error is-hidden" role="alert"></div>
             <button id="addIndicatorButton" class="primary-button" type="button"><span>添加并加载指标</span><strong>＋</strong></button>
             <button id="cancelEditButton" class="secondary-button cancel-edit-button is-hidden" type="button">取消编辑</button>
-            <div class="saved-indicator-heading"><h2>Saved indicators</h2><span class="refresh-actions"><button id="refreshIndicatorsButton" class="text-button" type="button">刷新激活项</button><button id="forceRefreshIndicatorsButton" class="text-button force-refresh-button" type="button" title="跳过本地缓存，直接向上游重新取数。上游修订过历史数据时用它。">强制刷新</button></span></div>
+            <div class="saved-indicator-heading"><h2>Saved indicators</h2><span class="refresh-actions"><button id="bulkModeButton" class="text-button" type="button" title="选中多个 indicator，一次把它们换到另一个标的，或按另一个标的复制一份。">批量</button><button id="refreshIndicatorsButton" class="text-button" type="button">刷新激活项</button><button id="forceRefreshIndicatorsButton" class="text-button force-refresh-button" type="button" title="跳过本地缓存，直接向上游重新取数。上游修订过历史数据时用它。">强制刷新</button></span></div>
+            <div id="bulkBar" class="bulk-bar is-hidden">
+              <div class="bulk-bar-row">
+                <strong id="bulkCount">已选 0 项</strong>
+                <span class="bulk-bar-links"><button class="text-button" type="button" data-bulk-all>全选基础指标</button><button class="text-button" type="button" data-bulk-none>清空</button><button class="text-button" type="button" data-bulk-exit>退出批量</button></span>
+              </div>
+              <div class="bulk-bar-row bulk-bar-apply">
+                <input id="bulkInstrumentCode" placeholder="目标 instrument code" autocomplete="off" aria-label="批量操作的目标 instrument code" />
+                <button id="bulkMoveButton" class="secondary-button" type="button">换成此标的</button>
+                <button id="bulkCopyButton" class="secondary-button" type="button">复制为此标的</button>
+              </div>
+              <p id="bulkNote" class="bulk-note"></p>
+            </div>
             <div id="savedIndicators" class="saved-indicators"><p class="empty-list-copy">尚未添加指标。</p></div>
             <p class="saved-indicator-storage-note">配置与启用状态保存在当前浏览器（换浏览器或清除站点数据后不共享）；行情响应不保存，重新打开后会重新请求。</p>
           </section>
