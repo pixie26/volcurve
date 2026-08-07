@@ -128,6 +128,8 @@
       operandA: "",
       operator: "subtract",
       operandB: "",
+      // User-chosen display name; empty means "use the generated technical name".
+      alias: "",
     };
   }
 
@@ -1458,7 +1460,14 @@
     renderIndicatorConfig();
   }
 
+  // A renamed indicator shows its alias everywhere it is named — chart legend, cards,
+  // statistics header, hover readout — including inside the name of anything derived from
+  // it, which is what keeps combination names short.
   function indicatorLabel(item, depth = 0) {
+    return indicatorAlias(item) || indicatorTechnicalLabel(item, depth);
+  }
+
+  function indicatorTechnicalLabel(item, depth = 0) {
     const config = item.config;
     if (item.type === "derived") {
       if (depth > MAX_CHARTS * 2) return "指标运算";
@@ -1867,11 +1876,7 @@
     for (const entry of stored) {
       if (!known.has(entry?.id) || seen.has(entry.id)) continue;
       seen.add(entry.id);
-      ordered.push({
-        id: entry.id,
-        visible: entry.visible !== false,
-        alias: typeof entry.alias === "string" && entry.alias.trim() ? entry.alias.trim() : undefined,
-      });
+      ordered.push({ id: entry.id, visible: entry.visible !== false });
     }
     // Columns added after the user saved their layout appear at the end, using that
     // column's own default — this is also what a first-ever visit falls through to.
@@ -1894,33 +1899,28 @@
     return indicatorState.statsColumns.filter((entry) => entry.visible).map((entry) => known.get(entry.id));
   }
 
-  // Statistic rows can be renamed to whatever the reader recognises; the original name is
-  // kept so the rename can always be undone and shown as a tooltip.
-  function statLabel(column) {
-    return statAlias(column.id) || column.label;
+  // An indicator column can be renamed to whatever the reader recognises. The generated
+  // technical name is never overwritten, so a rename is always reversible and stays
+  // available as the tooltip.
+  function indicatorAlias(item) {
+    return (item?.config?.alias || "").trim();
   }
 
-  function statAlias(id) {
-    return indicatorState.statsColumns.find((entry) => entry.id === id)?.alias || "";
+  function setIndicatorAlias(item, value) {
+    if (!item) return;
+    const trimmed = value.trim().slice(0, 60);
+    // Blank, or the generated wording, means "no alias" rather than a literal rename.
+    item.config.alias = trimmed && trimmed !== indicatorTechnicalLabel(item) ? trimmed : "";
+    persistWorkspace();
   }
 
-  function setStatAlias(id, value) {
-    const entry = indicatorState.statsColumns.find((column) => column.id === id);
-    const column = STAT_COLUMNS.find((candidate) => candidate.id === id);
-    if (!entry || !column) return;
-    const trimmed = value.trim().slice(0, 40);
-    // Blank, or the original wording, means "no alias" rather than a literal rename.
-    entry.alias = trimmed && trimmed !== column.label ? trimmed : undefined;
-    persistStatsColumns();
-  }
-
-  function startStatAliasEdit(host) {
-    const column = STAT_COLUMNS.find((candidate) => candidate.id === host.dataset.statLabel);
-    if (!column || host.querySelector("input")) return;
+  function startIndicatorAliasEdit(host) {
+    const item = itemById(host.dataset.indicatorAlias);
+    if (!item || host.querySelector("input")) return;
     const input = document.createElement("input");
     input.className = "stats-alias-input";
-    input.value = statLabel(column);
-    input.setAttribute("aria-label", `${column.label} 别名`);
+    input.value = indicatorLabel(item);
+    input.setAttribute("aria-label", `${indicatorTechnicalLabel(item)} 别名`);
     host.textContent = "";
     host.draggable = false;
     host.appendChild(input);
@@ -1929,9 +1929,8 @@
 
     const commit = (save) => {
       input.removeEventListener("blur", onBlur);
-      if (save) setStatAlias(column.id, input.value);
-      renderIndicatorStats();
-      renderStatsColumnConfig();
+      if (save) setIndicatorAlias(item, input.value);
+      refreshWorkspacePanels({ details: false });
     };
     const onBlur = () => commit(true);
     input.addEventListener("keydown", (event) => {
@@ -2018,8 +2017,8 @@
     });
     table.addEventListener("dragend", clearStatsDragState);
     table.addEventListener("dblclick", (event) => {
-      const host = event.target.closest("[data-stat-label]");
-      if (host) startStatAliasEdit(host);
+      const host = event.target.closest("[data-indicator-alias]");
+      if (host) startIndicatorAliasEdit(host);
     });
   }
 
@@ -2136,7 +2135,7 @@
     list.innerHTML = indicatorState.statsColumns.map((entry, index) => {
       const column = known.get(entry.id);
       return `<div class="stats-column-row">
-        <label><input type="checkbox" data-column-toggle="${entry.id}" ${entry.visible ? "checked" : ""} /><span title="${escapeHtml(column.label)}">${escapeHtml(statLabel(column))}</span></label>
+        <label><input type="checkbox" data-column-toggle="${entry.id}" ${entry.visible ? "checked" : ""} /><span>${escapeHtml(column.label)}</span></label>
         <span class="stats-column-move">
           <button type="button" data-column-move="up" data-column-id="${entry.id}" ${index === 0 ? "disabled" : ""} aria-label="上移 ${escapeHtml(column.label)}">↑</button>
           <button type="button" data-column-move="down" data-column-id="${entry.id}" ${index === indicatorState.statsColumns.length - 1 ? "disabled" : ""} aria-label="下移 ${escapeHtml(column.label)}">↓</button>
@@ -2169,7 +2168,7 @@
     $("indicatorStatsHead").innerHTML = `<tr>
       <th class="stats-label-cell">统计项${resizeHandle(STATS_LABEL_COLUMN)}</th>
       ${series.map(({ item, stats, error }) => `<th class="stats-series-head" data-drag-column="${item.id}">
-        <span class="stats-series-name" draggable="true" data-drag-handle title="拖动可调整列顺序">${escapeHtml(indicatorLabel(item))}</span>
+        <span class="stats-series-name ${indicatorAlias(item) ? "is-aliased" : ""}" draggable="true" data-drag-handle data-indicator-alias="${item.id}" title="${escapeHtml(indicatorAlias(item) ? `原名：${indicatorTechnicalLabel(item)} · 拖动排序 · 双击改别名` : "拖动排序 · 双击改别名")}">${escapeHtml(indicatorLabel(item))}</span>
         ${stats ? "" : `<small class="stats-series-note">${escapeHtml(error || "当前范围内没有有效值")}</small>`}
         ${resizeHandle(String(item.id))}
       </th>`).join("")}
@@ -2181,7 +2180,7 @@
       return;
     }
     body.innerHTML = rows.map((column) => `<tr>
-      <th scope="row" class="stats-label-cell" data-drag-row="${escapeHtml(column.id)}"><span class="stats-row-name ${statAlias(column.id) ? "is-aliased" : ""}" draggable="true" data-drag-handle data-stat-label="${escapeHtml(column.id)}" title="${escapeHtml(statAlias(column.id) ? `原名：${column.label} · 拖动排序 · 双击改别名` : "拖动排序 · 双击改别名")}">${escapeHtml(statLabel(column))}</span></th>
+      <th scope="row" class="stats-label-cell" data-drag-row="${escapeHtml(column.id)}"><span class="stats-row-name" draggable="true" data-drag-handle title="拖动可调整统计项顺序">${escapeHtml(column.label)}</span></th>
       ${series.map(({ item, stats }) => statCell(column, item, stats)).join("")}
     </tr>`).join("");
     $("indicatorStatsCount").textContent = `${series.length} series`;

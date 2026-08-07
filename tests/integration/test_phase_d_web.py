@@ -415,22 +415,28 @@ def test_long_indicator_names_are_shown_in_full():
     assert ".stats-table td { overflow: hidden; text-overflow: ellipsis; }" in stylesheet
 
 
-def test_statistic_rows_can_be_renamed_to_a_personal_alias():
+def test_indicator_columns_can_be_renamed_to_a_personal_alias():
     with TestClient(app) as client:
         html = client.get("/").text
         javascript = client.get("/static/compare-builder.js").text
 
-    assert "双击行首可以改成你自己的别名" in html
-    assert "data-stat-label" in javascript
-    assert "function startStatAliasEdit" in javascript
+    assert "双击 indicator 列头可以给它起一个自己的别名" in html
+    assert "data-indicator-alias" in javascript
+    assert "function startIndicatorAliasEdit" in javascript
 
-    setter = javascript.split("function setStatAlias", 1)[1].split("function startStatAliasEdit", 1)[0]
+    setter = javascript.split("function setIndicatorAlias", 1)[1].split("function startIndicatorAliasEdit", 1)[0]
     # Blank or unchanged text clears the alias instead of storing a literal rename.
-    assert 'entry.alias = trimmed && trimmed !== column.label ? trimmed : undefined' in setter
-    assert "persistStatsColumns()" in setter
-    # The alias is restored with the rest of the column layout.
-    restore = javascript.split("function restoreStatsColumns", 1)[1].split("function persistStatsColumns", 1)[0]
-    assert "alias:" in restore
+    assert 'item.config.alias = trimmed && trimmed !== indicatorTechnicalLabel(item) ? trimmed : ""' in setter
+    assert "persistWorkspace()" in setter
+
+    # The alias lives in the indicator's own config, so it travels with boards too.
+    assert 'alias: "",' in javascript.split("function defaultDraft", 1)[1].split("}", 1)[0] + '"'
+    # The generated name is never overwritten and stays reachable.
+    assert "function indicatorTechnicalLabel" in javascript
+    label = javascript.split("function indicatorLabel", 1)[1].split("function indicatorTechnicalLabel", 1)[0]
+    assert "indicatorAlias(item) || indicatorTechnicalLabel(item, depth)" in label
+    # Statistic rows are back to their fixed names.
+    assert "startStatAliasEdit" not in javascript
 
 
 def test_unsaved_board_changes_are_signalled_in_red():
