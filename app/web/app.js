@@ -9,16 +9,16 @@ const state = {
 };
 
 const MODE_LABELS = {
-  sliding_moneyness: "Sliding · K/F 或 K/S",
-  sliding_delta: "Sliding · Put/Call delta",
-  fixed_strike: "Fixed/Listed · 绝对 strike",
-  listed_moneyness: "Fixed/Listed · K/F 或 K/S",
+  sliding_moneyness: "Sliding · moneyness",
+  sliding_delta: "Sliding · delta",
+  fixed_strike: "Fixed/Listed · absolute strike",
+  listed_moneyness: "Fixed/Listed · moneyness",
 };
 
 const INDICATOR_LABELS = {
   implied_vol: "Implied vol",
   realized_vol: "Realized vol",
-  spot: "Spot · 未复权",
+  spot: "Spot",
   forward: "Forward",
   iv_minus_rv: "IV − RV",
   iv_divided_by_rv: "IV / RV",
@@ -311,7 +311,7 @@ async function loadListedCoordinates() {
         volatilityRequest: {
           code,
           code_type: "bnpp",
-          volatility_convention: $("volConvention").value,
+          volatility_convention: "bsVol",
           start_date: date,
           end_date: date,
           maturity_rule: "fixed",
@@ -416,10 +416,10 @@ function buildVolatilityRequest() {
   const request = {
     code: $("instrumentCode").value.trim(),
     code_type: "bnpp",
-    volatility_convention: $("volConvention").value,
+    volatility_convention: "bsVol",
     start_date: $("startDate").value,
     end_date: $("endDate").value,
-    layout: $("layout").value,
+    layout: "matrix",
   };
   const compare = state.queryKind === "compare";
   if (mode === "sliding_moneyness") {
@@ -810,11 +810,8 @@ function renderActivity() {
 }
 
 function renderBuilderDisclosures() {
-  if (!state.capabilities) return;
-  const context = new Set(["request_builder", "instrument_search", state.queryKind]);
-  const entries = applicableDisclosures(state.capabilities.disclosures, context, "query_builder");
-  renderDisclosureEntries($("queryBuilderDisclosures"), entries);
-  $("builderDisclosureCount").textContent = `(${entries.length})`;
+  // Generic rules are not request warnings. They are shown on demand in the
+  // result-side Methodology & Rules section instead of occupying the query rail.
 }
 
 function renderResponseDisclosures() {

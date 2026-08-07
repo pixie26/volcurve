@@ -42,15 +42,15 @@
   // A sliding range is re-derived from today every time the workspace or a board opens,
   // so reopening tomorrow pulls tomorrow's data without touching the configuration.
   const SLIDING_WINDOWS = [
-    { id: "1M", label: "近 1 个月", months: 1 },
-    { id: "3M", label: "近 3 个月", months: 3 },
-    { id: "6M", label: "近 6 个月", months: 6 },
-    { id: "YTD", label: "年初至今", ytd: true },
-    { id: "1Y", label: "近 1 年", years: 1 },
-    { id: "2Y", label: "近 2 年", years: 2 },
-    { id: "3Y", label: "近 3 年", years: 3 },
-    { id: "5Y", label: "近 5 年", years: 5 },
-    { id: "10Y", label: "近 10 年", years: 10 },
+    { id: "1M", label: "1M" },
+    { id: "3M", label: "3M" },
+    { id: "6M", label: "6M" },
+    { id: "YTD", label: "YTD" },
+    { id: "1Y", label: "1Y" },
+    { id: "2Y", label: "2Y" },
+    { id: "3Y", label: "3Y" },
+    { id: "5Y", label: "5Y" },
+    { id: "10Y", label: "10Y" },
   ];
 
   const STATS_LABEL_COLUMN = "__label__";
@@ -64,9 +64,9 @@
   const TYPE_LABELS = {
     implied_vol: "Implied volatility",
     realized_vol: "Realized volatility",
-    spot: "Spot · 原始未复权",
+    spot: "Spot",
     forward: "Forward",
-    derived: "Derived · 指标运算",
+    derived: "Derived",
   };
   const OPERATOR_SYMBOLS = { add: "＋", subtract: "−", multiply: "×", divide: "÷" };
   const VOL_TYPES = new Set(["implied_vol", "realized_vol"]);
@@ -197,6 +197,7 @@
       persistWorkspace();
       renderIndicatorDetails();
     });
+    on("qualityContent", "click", handleQualityIssueClick);
     for (const id of ["startDate", "endDate"]) {
       on(id, "change", invalidateIndicators);
     }
@@ -237,15 +238,37 @@
   }
 
   function bindDateModeControls() {
-    $("slidingWindow").innerHTML = SLIDING_WINDOWS
-      .map((window) => `<option value="${window.id}">${escapeHtml(window.label)}</option>`).join("");
+    const datalist = $("slidingWindowOptions");
+    if (datalist) {
+      datalist.innerHTML = SLIDING_WINDOWS
+        .map((window) => `<option value="${window.id}">${escapeHtml(window.label)}</option>`).join("");
+    }
+
     $("dateMode").addEventListener("change", () => {
       indicatorState.dateMode = $("dateMode").value === "fixed" ? "fixed" : "sliding";
       applyDateModeChange();
     });
-    $("slidingWindow").addEventListener("change", () => {
-      indicatorState.slidingWindow = $("slidingWindow").value;
+
+    const lookback = $("slidingWindow");
+    const commitLookback = () => {
+      const raw = lookback.value.trim();
+      if (!isValidSlidingWindow(raw)) {
+        $("dateModeNote").textContent = "Lookback 格式：正整数 + d / w / m / y，例如 52d、2w、3m、3y；也可以输入 YTD。";
+        lookback.setAttribute("aria-invalid", "true");
+        return;
+      }
+      lookback.removeAttribute("aria-invalid");
+      indicatorState.slidingWindow = normalizeSlidingWindow(raw);
+      lookback.value = indicatorState.slidingWindow;
       applyDateModeChange();
+    };
+
+    lookback.addEventListener("change", commitLookback);
+    lookback.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitLookback();
+      }
     });
   }
 
@@ -258,17 +281,22 @@
 
   function slidingRange(windowId) {
     const today = isoDate(new Date());
-    const window = SLIDING_WINDOWS.find((entry) => entry.id === windowId)
-      || SLIDING_WINDOWS.find((entry) => entry.id === "1Y");
-    if (window.ytd) return { start: `${today.slice(0, 4)}-01-01`, end: today };
-    return {
-      start: addCalendar(today, { years: -(window.years || 0), months: -(window.months || 0) }),
-      end: today,
-    };
+    const normalized = normalizeSlidingWindow(windowId);
+    if (normalized === "YTD") return { start: `${today.slice(0, 4)}-01-01`, end: today };
+
+    const match = normalized.match(/^([1-9]\d*)([DWMY])$/);
+    const amount = Number(match[1]);
+    const unit = match[2];
+    const offset = unit === "D"
+      ? { days: -amount }
+      : unit === "W"
+        ? { days: -(amount * 7) }
+        : unit === "M"
+          ? { months: -amount }
+          : { years: -amount };
+    return { start: addCalendar(today, offset), end: today };
   }
 
-  // Writes today's window into the date inputs. Returns whether the range actually moved,
-  // so callers only invalidate loaded series when the dates really changed.
   function syncSlidingRange() {
     if (indicatorState.dateMode !== "sliding") return false;
     const { start, end } = slidingRange(indicatorState.slidingWindow);
@@ -287,14 +315,11 @@
       $(id).disabled = sliding;
       $(id).classList.toggle("is-derived", sliding);
     }
-    const label = SLIDING_WINDOWS.find((entry) => entry.id === indicatorState.slidingWindow)?.label || "近 1 年";
     $("dateModeNote").textContent = sliding
-      ? `${label}：结束日期跟随今天，每次打开页面、载入 board 或点「刷新激活项」都会重新算到当天，因此拿到的是最新数据。`
-      : "固定日期：范围保持不变，重新打开也只取这段区间。日期范围对所有坐标与 indicator 共享；修改后已保存的 indicator 需要刷新才会重新取数。";
+      ? `${indicatorState.slidingWindow}：按自然日历回溯，结束日期跟随今天。`
+      : "固定日期：范围保持不变。日期范围对所有坐标与 indicator 共享；修改后已保存的 indicator 需要刷新才会重新取数。";
   }
 
-  // The underlying and the target chart lane live above the indicator builder so a new
-  // indicator is described top-down: date range → underlying + lane → indicator definition.
   function bindScopeFields() {
     const instrument = document.querySelector('[data-draft="instrumentCode"]');
     const lane = document.querySelector('[data-draft="chartLane"]');
@@ -519,8 +544,14 @@
     return custom || `坐标 ${lane}`;
   }
 
+  function isValidSlidingWindow(value) {
+    const normalized = String(value || "").trim().toUpperCase();
+    return normalized === "YTD" || /^[1-9]\d*[DWMY]$/.test(normalized);
+  }
+
   function normalizeSlidingWindow(value) {
-    return SLIDING_WINDOWS.some((entry) => entry.id === value) ? value : "1Y";
+    const normalized = String(value || "").trim().toUpperCase();
+    return isValidSlidingWindow(normalized) ? normalized : "1Y";
   }
 
   function normalizeColumnWidths(raw) {
@@ -827,7 +858,7 @@
       .map(([key, symbol]) => `<option value="${key}" ${draft.operator === key ? "selected" : ""}>${symbol}</option>`).join("");
     return `<div class="derived-operands">
       <label class="field"><span>Indicator A</span><select data-draft="operandA">${operandOptions(draft.operandA)}</select></label>
-      <label class="field operator-field"><span>运算</span><select data-draft="operator">${operatorOptions}</select></label>
+      <label class="field operator-field"><span>Operator</span><select data-draft="operator">${operatorOptions}</select></label>
       <label class="field"><span>Indicator B</span><select data-draft="operandB">${operandOptions(draft.operandB)}</select></label>
     </div><p class="derived-preview">${escapeHtml(derivedPreviewLabel(draft))}</p>`;
   }
@@ -844,17 +875,21 @@
   }
 
   function requestSystemFields(draft) {
-    return `<div class="field-grid two config-grid request-system-fields">
-      <label class="field"><span>Vol convention</span><select data-draft="volatilityConvention"><option value="bsVol" ${draft.volatilityConvention === "bsVol" ? "selected" : ""}>bsVol</option><option value="bnppVol" ${draft.volatilityConvention === "bnppVol" ? "selected" : ""}>bnppVol</option></select><small>数据源字段；通常只有 bsVol 可用。</small></label>
-      <label class="field"><span>Layout</span><select data-draft="layout"><option value="matrix" ${draft.layout === "matrix" ? "selected" : ""}>Matrix</option><option value="vector" ${draft.layout === "vector" ? "selected" : ""}>Vector</option></select><small>数据源返回结构；数值语义不变。</small></label>
-    </div>`;
+    // Ordinary equity IV is always requested as Black-Scholes vol in matrix layout.
+    // Keep these internal fields for backward-compatible saved boards only.
+    draft.volatilityConvention = "bsVol";
+    draft.layout = "matrix";
+    return "";
   }
 
   function maturityModeField(draft) {
+    const legacyFixed = draft.maturityMode === "fixed"
+      ? '<option value="fixed" selected>Fixed date · legacy</option>'
+      : "";
     return `<label class="field field-wide config-first"><span>Maturity type</span><select data-draft="maturityMode">
       <option value="sliding" ${draft.maturityMode === "sliding" ? "selected" : ""}>Sliding tenor</option>
-      <option value="fixed" ${draft.maturityMode === "fixed" ? "selected" : ""}>Fixed date · theoretical allowed</option>
-      <option value="listed" ${draft.maturityMode === "listed" ? "selected" : ""}>Listed expiry only</option>
+      <option value="listed" ${draft.maturityMode === "listed" ? "selected" : ""}>Listed expiry</option>
+      ${legacyFixed}
     </select></label>`;
   }
 
@@ -865,8 +900,47 @@
         : state.capabilities?.slidingMaturities || [];
       return `<label class="field field-wide"><span>Sliding maturity</span><input data-draft="slidingMaturity" value="${escapeHtml(draft.slidingMaturity)}" list="indicatorMaturityOptions" autocomplete="off" /><datalist id="indicatorMaturityOptions">${optionList(maturities)}</datalist><small>可键盘输入，但必须是数据源 OpenAPI 列出的 tenor；不支持的值会在本地明确拒绝。</small></label>`;
     }
-    const typeLabel = draft.maturityMode === "listed" ? "Listed expiry" : "Fixed maturity date";
-    return `<label class="field field-wide"><span>${typeLabel}</span><input data-draft="expiry" type="date" value="${escapeHtml(draft.expiry)}" /><small>允许手输任意合法日期；精确点不存在时保持缺失，不改成最近日期。</small></label>`;
+
+    if (draft.maturityMode === "fixed") {
+      return `<label class="field field-wide"><span>Fixed maturity date · legacy</span><input data-draft="expiry" type="date" value="${escapeHtml(draft.expiry)}" /><small>仅为兼容已有 board / indicator 保留；新建指标不再提供 Fixed date。</small></label>`;
+    }
+
+    const code = draft.instrumentCode.trim();
+    const discovery = indicatorState.discovery;
+    const defaultObservationDate = $("endDate")?.value || isoDate(new Date());
+
+    // The chosen observation date is UI state, not response state. Keeping it separate
+    // prevents a late/failed request from snapping the date input back to an older value.
+    const observationDate = indicatorState.listedObservationDate
+      || discovery?.date
+      || defaultObservationDate;
+    indicatorState.listedObservationDate = observationDate;
+
+    const matches = discovery
+      && discovery.code === code
+      && discovery.date === observationDate;
+
+    let expiryOptions = '<option value="">Loading listed expiries…</option>';
+    let disabled = "disabled";
+    let note = `正在读取 ${observationDate} 的 listed expiries…`;
+
+    if (matches && discovery.status === "ready") {
+      const maturities = [...new Set(discovery.snapshot.maturities || [])].sort();
+      expiryOptions = `<option value="">Select listed expiry</option>${maturities
+        .map((value) => `<option value="${escapeHtml(value)}" ${draft.expiry === value ? "selected" : ""}>${escapeHtml(value)}</option>`)
+        .join("")}`;
+      disabled = "";
+      note = `${observationDate}：${maturities.length} 个 available listed expiries。`;
+    } else if (matches && discovery.status === "error") {
+      expiryOptions = '<option value="">Listed expiries unavailable</option>';
+      disabled = "disabled";
+      note = `读取失败：${escapeHtml(discovery.message || "unknown error")}`;
+    }
+
+    return `<div class="field-grid two config-grid listed-expiry-direct">
+      <label class="field"><span>Observation date</span><input id="indicatorObservationDate" type="date" value="${escapeHtml(observationDate)}" /></label>
+      <label class="field"><span>Listed expiry</span><select id="indicatorListedExpiry" data-draft="expiry" ${disabled}>${expiryOptions}</select></label>
+    </div><small id="indicatorListedExpiryStatus">${note}</small>`;
   }
 
   function strikeFields(draft) {
@@ -881,12 +955,28 @@
     if (selectedKind === "percentage") {
       coordinate = `<div class="field-grid two config-grid">
         <label class="field"><span>Percentage</span><input data-draft="moneyness" type="number" step="0.1" value="${escapeHtml(draft.moneyness)}" list="indicatorMoneynessOptions" /><datalist id="indicatorMoneynessOptions">${optionList(state.capabilities?.moneynessLevels || [])}</datalist></label>
-        <label class="field"><span>Relative to</span><select data-draft="moneynessBasis"><option value="relative_to_forward" ${draft.moneynessBasis === "relative_to_forward" ? "selected" : ""}>Forward · K/F</option><option value="relative_to_spot_ref" ${draft.moneynessBasis === "relative_to_spot_ref" ? "selected" : ""}>Spot reference · K/S</option></select></label>
+        <label class="field"><span>Relative to</span><select data-draft="moneynessBasis"><option value="relative_to_forward" ${draft.moneynessBasis === "relative_to_forward" ? "selected" : ""}>Fwd</option><option value="relative_to_spot_ref" ${draft.moneynessBasis === "relative_to_spot_ref" ? "selected" : ""}>Spot</option></select></label>
       </div>`;
     } else if (selectedKind === "delta") {
       coordinate = `<label class="field field-wide"><span>Put / Call delta</span><input data-draft="delta" value="${escapeHtml(draft.delta)}" list="indicatorDeltaOptions" autocomplete="off" /><datalist id="indicatorDeltaOptions">${optionList(state.capabilities?.deltaStrikes || [])}</datalist><small>Delta 只支持 sliding maturity 和数据源官方 delta codes。</small></label>`;
     } else {
-      coordinate = `<label class="field field-wide"><span>Absolute strike</span><input data-draft="absoluteStrike" type="number" min="0.000001" step="any" value="${escapeHtml(draft.absoluteStrike)}" /><small>允许任意正数；不存在的精确 strike 返回缺失，不自动取 listed 邻近值。</small></label>`;
+      const discovery = indicatorState.discovery;
+      const expiry = draft.expiry;
+      const strikeReady = discovery?.strikeStatus === "ready"
+        && discovery?.strikeExpiry === expiry;
+      const strikes = strikeReady ? discovery.strikes || [] : [];
+      const list = strikes
+        .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+        .join("");
+      let strikeNote = "先选择 Listed expiry；随后会自动加载该 expiry 的 available strikes。";
+      if (expiry && discovery?.strikeStatus === "loading" && discovery?.strikeExpiry === expiry) {
+        strikeNote = `正在加载 ${expiry} 的 available strikes…`;
+      } else if (expiry && discovery?.strikeStatus === "error" && discovery?.strikeExpiry === expiry) {
+        strikeNote = `Strike list 读取失败：${escapeHtml(discovery.strikeMessage || "unknown error")}；仍可手动输入绝对 strike。`;
+      } else if (expiry && strikeReady) {
+        strikeNote = `${expiry}：${strikes.length} 个 available strikes；可直接输入任意正数，也可从下拉建议选择。`;
+      }
+      coordinate = `<label class="field field-wide"><span>Absolute strike</span><input data-draft="absoluteStrike" type="number" min="0.000001" step="any" value="${escapeHtml(draft.absoluteStrike)}" list="indicatorAbsoluteStrikeOptions" autocomplete="off" ${expiry ? "" : "disabled"} /><datalist id="indicatorAbsoluteStrikeOptions">${list}</datalist><small id="indicatorAbsoluteStrikeStatus">${strikeNote}</small></label>`;
     }
     const combinationNote = fixedMaturity ? "" : "<small>数据源 API 不支持 Sliding maturity + Absolute strike；系统不会自动把 3M 转成邻近 expiry。</small>";
     return `<label class="field field-wide"><span>Strike type</span><select data-draft="strikeKind">
@@ -918,43 +1008,145 @@
     });
   }
 
-  function listedDiscoveryPanel(draft) {
-    if (draft.maturityMode !== "listed") return "";
-    const discovery = indicatorState.discovery;
-    const observationDate = discovery?.date || $("endDate").value || isoDate(new Date());
-    let result = "";
-    if (discovery?.status === "loading") {
-      result = '<p class="coordinate-discovery-status">正在向数据源请求该观察日的 listed surface…</p>';
-    } else if (discovery?.status === "error") {
-      result = `<p class="coordinate-discovery-error">${escapeHtml(discovery.message)}</p>`;
-    } else if (discovery?.status === "ready") {
-      const expiries = discovery.snapshot.maturities.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
-      const needsStrike = draft.type === "implied_vol" && draft.strikeKind === "absolute";
-      result = `<div class="coordinate-grid discovery-selectors">
-        <label class="field"><span>Available expiry</span><select id="indicatorAvailableExpiry"><option value="">请选择实际 expiry</option>${expiries}</select></label>
-        ${needsStrike ? '<label class="field"><span>Available strike</span><select id="indicatorAvailableStrike" disabled><option value="">先选择 expiry</option></select></label>' : ""}
-      </div><p id="indicatorCoordinateStatus" class="coordinate-discovery-status">数据源返回 ${discovery.snapshot.maturities.length} 个 expiry；系统没有自动选择。</p>
-      <button id="applyIndicatorCoordinate" class="secondary-button discovery-apply" type="button" disabled>应用所选 listed 坐标</button>`;
-    }
-    return `<section class="coordinate-discovery" aria-label="listed 坐标发现">
-      <div class="coordinate-discovery-heading"><strong>加载实际 listed 坐标</strong><small>手输仍然允许；加载结果只供明确选择，不替代当前输入。</small></div>
-      <div class="field-grid discovery-loader"><label class="field"><span>Observation date</span><input id="indicatorObservationDate" type="date" value="${escapeHtml(observationDate)}" /></label><button id="loadIndicatorCoordinates" class="secondary-button" type="button" ${discovery?.status === "loading" ? "disabled" : ""}>加载可用坐标</button></div>${result}
-    </section>`;
+  function listedDiscoveryPanel(_draft) {
+    return "";
   }
 
   function bindIndicatorDiscovery() {
-    $("loadIndicatorCoordinates")?.addEventListener("click", loadIndicatorCoordinates);
-    $("indicatorAvailableExpiry")?.addEventListener("change", updateIndicatorDiscoverySelection);
-    $("indicatorAvailableStrike")?.addEventListener("change", updateIndicatorApplyState);
-    $("applyIndicatorCoordinate")?.addEventListener("click", applyIndicatorCoordinate);
+    if (indicatorState.draft.maturityMode !== "listed") return;
+
+    const observation = $("indicatorObservationDate");
+    if (observation) {
+      const syncDateOnly = () => {
+        const nextDate = observation.value;
+        indicatorState.listedObservationDate = nextDate;
+        indicatorState.draft.expiry = "";
+        indicatorState.draft.absoluteStrike = "";
+      };
+
+      observation.addEventListener("keydown", (event) => {
+        if (/^[0-9]$/.test(event.key) || ["Backspace", "Delete"].includes(event.key)) {
+          indicatorState.listedDateTyping = true;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          syncDateOnly();
+          indicatorState.listedDateTyping = false;
+          if (validIsoDate(observation.value)) loadIndicatorCoordinates(observation.value);
+        }
+      });
+
+      // While the user is typing into the native date control, only preserve the value.
+      // Do not re-render the whole indicator form: replacing the focused <input type=date>
+      // causes Chromium to jump between date segments and makes keyboard entry unusable.
+      observation.addEventListener("input", syncDateOnly);
+
+      observation.addEventListener("change", () => {
+        syncDateOnly();
+        if (!indicatorState.listedDateTyping && validIsoDate(observation.value)) {
+          loadIndicatorCoordinates(observation.value);
+        }
+      });
+
+      observation.addEventListener("blur", () => {
+        syncDateOnly();
+        const nextDate = observation.value;
+        indicatorState.listedDateTyping = false;
+        if (
+          validIsoDate(nextDate)
+          && (
+            indicatorState.discovery?.code !== indicatorState.draft.instrumentCode.trim()
+            || indicatorState.discovery?.date !== nextDate
+          )
+        ) {
+          loadIndicatorCoordinates(nextDate);
+        }
+      });
+    }
+
+    const expirySelect = $("indicatorListedExpiry");
+    expirySelect?.addEventListener("change", () => {
+      const expiry = expirySelect.value;
+      if (indicatorState.draft.strikeKind === "absolute") {
+        indicatorState.draft.absoluteStrike = "";
+        if (expiry) loadListedStrikes(expiry);
+      }
+    });
+
+    const code = indicatorState.draft.instrumentCode.trim();
+    const date = indicatorState.listedObservationDate
+      || observation?.value
+      || $("endDate")?.value
+      || isoDate(new Date());
+    indicatorState.listedObservationDate = date;
+
+    const discovery = indicatorState.discovery;
+    const matches = discovery
+      && discovery.code === code
+      && discovery.date === date;
+
+    if (!matches) {
+      queueMicrotask(() => {
+        if (
+          indicatorState.draft.maturityMode === "listed"
+          && indicatorState.draft.instrumentCode.trim() === code
+          && indicatorState.listedObservationDate === date
+          && !indicatorState.listedDateTyping
+        ) {
+          loadIndicatorCoordinates(date);
+        }
+      });
+      return;
+    }
+
+    if (
+      discovery.status === "ready"
+      && indicatorState.draft.strikeKind === "absolute"
+      && indicatorState.draft.expiry
+      && !(
+        discovery.strikeExpiry === indicatorState.draft.expiry
+        && ["loading", "ready", "error"].includes(discovery.strikeStatus)
+      )
+    ) {
+      const expiry = indicatorState.draft.expiry;
+      queueMicrotask(() => {
+        if (
+          indicatorState.draft.maturityMode === "listed"
+          && indicatorState.listedObservationDate === date
+          && indicatorState.draft.expiry === expiry
+          && !indicatorState.listedDateTyping
+        ) {
+          loadListedStrikes(expiry);
+        }
+      });
+    }
   }
 
-  async function loadIndicatorCoordinates() {
+  async function loadListedStrikes(expiry) {
     const code = indicatorState.draft.instrumentCode.trim();
-    const date = $("indicatorObservationDate").value;
-    if (!code || !date) return showIndicatorFormError("加载坐标前需要 instrument code 和 observation date。");
-    indicatorState.discovery = { status: "loading", code, date };
+    const date = indicatorState.listedObservationDate
+      || $("indicatorObservationDate")?.value
+      || indicatorState.discovery?.date
+      || $("endDate")?.value;
+    if (!code || !date || !expiry) return;
+
+    const discovery = indicatorState.discovery;
+    if (!discovery || discovery.code !== code || discovery.date !== date || discovery.status !== "ready") {
+      return;
+    }
+    if (discovery.strikeStatus === "loading" && discovery.strikeExpiry === expiry) return;
+
+    const requestSeq = (indicatorState.strikeRequestSeq || 0) + 1;
+    indicatorState.strikeRequestSeq = requestSeq;
+    indicatorState.discovery = {
+      ...discovery,
+      strikeStatus: "loading",
+      strikeExpiry: expiry,
+      strikeMessage: null,
+      strikes: [],
+    };
     renderIndicatorConfig();
+
     try {
       const response = await apiFetch(state.capabilities.endpoints.surface, {
         method: "POST",
@@ -962,21 +1154,151 @@
         body: JSON.stringify({ volatilityRequest: {
           code,
           code_type: "bnpp",
-          volatility_convention: indicatorState.draft.volatilityConvention,
+          volatility_convention: "bsVol",
           start_date: date,
           end_date: date,
-          maturity_rule: "fixed",
+          maturity_rule: "listed",
           strike_rule: "fixed",
-          layout: indicatorState.draft.layout,
+          low_fixed_maturity: expiry,
+          high_fixed_maturity: expiry,
+          layout: "matrix",
         }}),
       });
       const payload = await response.json();
-      const snapshot = payload.snapshots.find((item) => item.date === date);
-      if (!snapshot) throw new Error("数据源在该观察日没有返回 listed surface。");
-      indicatorState.discovery = { status: "ready", code, date, snapshot };
+
+      if (
+        indicatorState.strikeRequestSeq !== requestSeq
+        || indicatorState.draft.maturityMode !== "listed"
+        || indicatorState.draft.strikeKind !== "absolute"
+        || indicatorState.draft.instrumentCode.trim() !== code
+        || indicatorState.listedObservationDate !== date
+        || indicatorState.draft.expiry !== expiry
+      ) return;
+
+      const snapshot = payload.snapshots?.find((item) => item.date === date);
+      if (!snapshot) throw new Error("No listed strike surface returned for this observation date.");
+
+      const strikes = [...new Set(
+        (snapshot.points || [])
+          .filter((point) => point.maturity === expiry)
+          .map((point) => Number(point.strike))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )].sort((a, b) => a - b);
+
+      indicatorState.discovery = {
+        ...indicatorState.discovery,
+        strikeStatus: "ready",
+        strikeExpiry: expiry,
+        strikeMessage: null,
+        strikeSnapshot: snapshot,
+        strikes: strikes.map(String),
+      };
     } catch (error) {
-      indicatorState.discovery = { status: "error", code, date, message: error.payload?.message || error.message };
+      if (
+        indicatorState.strikeRequestSeq !== requestSeq
+        || indicatorState.draft.maturityMode !== "listed"
+        || indicatorState.draft.strikeKind !== "absolute"
+        || indicatorState.draft.instrumentCode.trim() !== code
+        || indicatorState.listedObservationDate !== date
+        || indicatorState.draft.expiry !== expiry
+      ) return;
+
+      indicatorState.discovery = {
+        ...indicatorState.discovery,
+        strikeStatus: "error",
+        strikeExpiry: expiry,
+        strikeMessage: error.payload?.message || error.message,
+        strikes: [],
+      };
     }
+
+    renderIndicatorConfig();
+  }
+
+  async function loadIndicatorCoordinates(dateOverride = "") {
+    const code = indicatorState.draft.instrumentCode.trim();
+    const date = dateOverride
+      || indicatorState.listedObservationDate
+      || $("indicatorObservationDate")?.value
+      || $("endDate")?.value;
+
+    if (!code || !date) {
+      indicatorState.discovery = {
+        status: "error",
+        code,
+        date,
+        message: "Instrument code and observation date are required.",
+      };
+      renderIndicatorConfig();
+      return;
+    }
+
+    indicatorState.listedObservationDate = date;
+    const current = indicatorState.discovery;
+    if (current?.status === "loading" && current.code === code && current.date === date) return;
+
+    const requestSeq = (indicatorState.discoveryRequestSeq || 0) + 1;
+    indicatorState.discoveryRequestSeq = requestSeq;
+    indicatorState.discovery = { status: "loading", code, date };
+    renderIndicatorConfig();
+
+    try {
+      const response = await apiFetch(state.capabilities.endpoints.surface, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volatilityRequest: {
+          code,
+          code_type: "bnpp",
+          volatility_convention: "bsVol",
+          start_date: date,
+          end_date: date,
+          maturity_rule: "listed",
+          strike_rule: "relative_to_forward",
+          low_strike: 100,
+          high_strike: 100,
+          layout: "matrix",
+        }}),
+      });
+      const payload = await response.json();
+
+      // Only the most recent user choice may update the UI.
+      if (
+        indicatorState.discoveryRequestSeq !== requestSeq
+        || indicatorState.draft.maturityMode !== "listed"
+        || indicatorState.draft.instrumentCode.trim() !== code
+        || indicatorState.listedObservationDate !== date
+      ) return;
+
+      const snapshot = payload.snapshots?.find((item) => item.date === date);
+      if (!snapshot) throw new Error("No listed surface returned for this observation date.");
+
+      const maturities = [...new Set(snapshot.maturities || [])].sort();
+      if (indicatorState.draft.expiry && !maturities.includes(indicatorState.draft.expiry)) {
+        indicatorState.draft.expiry = "";
+      }
+
+      indicatorState.discovery = {
+        status: "ready",
+        code,
+        date,
+        snapshot: { ...snapshot, maturities },
+      };
+    } catch (error) {
+      if (
+        indicatorState.discoveryRequestSeq !== requestSeq
+        || indicatorState.draft.maturityMode !== "listed"
+        || indicatorState.draft.instrumentCode.trim() !== code
+        || indicatorState.listedObservationDate !== date
+      ) return;
+
+      indicatorState.discovery = {
+        status: "error",
+        code,
+        date,
+        message: error.payload?.message || error.message,
+      };
+    }
+
     renderIndicatorConfig();
   }
 
@@ -1698,10 +2020,10 @@
     const base = {
       code: item.config.instrumentCode.trim(),
       code_type: "bnpp",
-      volatility_convention: item.config.volatilityConvention,
+      volatility_convention: "bsVol",
       start_date: $("startDate").value,
       end_date: $("endDate").value,
-      layout: item.config.layout,
+      layout: "matrix",
     };
     let volatilityRequest;
     if (item.type === "implied_vol") {
@@ -2197,7 +2519,7 @@
   }
 
   function indicatorDetail(item) {
-    const wire = `${item.config.volatilityConvention} · ${item.config.layout}`;
+    const wire = "bsVol · matrix";
     const placement = chartDisplayName(Number(item.config.chartLane));
     if (item.type === "derived") return `${placement} · 浏览器本地按共同观察日计算 · 不发送新的取数请求`;
     if (item.type === "realized_vol") return `${placement} · price-return RV · spot via reference 3M K/F 100% · ${wire} carrier`;
@@ -2240,6 +2562,11 @@
         paper_bgcolor: "#fffef9",
         plot_bgcolor: "#fffef9",
         hovermode: "x unified",
+        hoverlabel: {
+          bgcolor: "rgba(255,254,249,0.78)",
+          bordercolor: "rgba(126,145,134,0.55)",
+          font: { color: "#334139" },
+        },
         dragmode: "zoom",
         legend: { orientation: "h", y: 1.1, x: 0 },
         font: { family: "Inter, Microsoft YaHei, sans-serif", size: 10, color: "#536159" },
@@ -2422,6 +2749,7 @@
     renderIndicatorDetailMethodology(item);
     renderIndicatorDetailQuality(item);
     renderIndicatorDetailActivity(item);
+    renderIndicatorDetailRules(item);
     renderIndicatorDetailDisclosures(item);
     renderIndicatorDetailWarnings(item);
   }
@@ -2456,55 +2784,191 @@
     const selectedLabel = TYPE_LABELS[item.type];
     const headers = ["Date", `Selected · ${selectedLabel}`, "Spot · unadjusted", "Forward", "Raw IV %", "Effective IV %", "RV %", "Quality flags"];
     $("resultTableHead").innerHTML = `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
-    $("resultTableBody").innerHTML = item.response.series.map((point) => `<tr>
+    $("resultTableBody").innerHTML = item.response.series.map((point) => `<tr data-observation-date="${escapeHtml(point.date)}">
       <td>${escapeHtml(point.date)}</td><td>${tableValue(point[selectedKey])}</td><td>${tableValue(point.spot)}</td><td>${tableValue(point.forward)}</td>
       <td>${tableValue(point.rawImpliedVol)}</td><td>${tableValue(point.impliedVol)}</td><td>${tableValue(point.realizedVol)}</td><td>${flagHtml(point.qualityFlags)}</td>
     </tr>`).join("");
     $("tableTitle").textContent = `${selectedLabel} · 完整响应明细`;
     $("tableCount").textContent = `${item.response.series.length} rows`;
-    $("tableFootnote").textContent = item.type === "realized_vol"
-      ? "Selected 列是图中该 indicator 使用的值；其余列保留后端同一响应中的载体、原值和质量信息。Raw IV 不会因无效而被删除。"
-      : "Selected 列是图中该 indicator 使用的值；其余列保留后端同一响应中的载体、原值和质量信息。Raw IV 不会因无效而被删除。RV 列为空是因为该 indicator 没有请求 RV：不计算就不会因为预热期缺历史而报质量问题。";
+    $("tableFootnote").textContent = "Selected 列是图中该 indicator 使用的值；其余字段用于审计数据源响应与质量标记。无效 raw IV 保留，但 effective IV 可为空。";
   }
 
   function renderIndicatorDetailMethodology(item) {
     const data = item.response;
-    const method = data.methodology;
     const request = item.request.volatilityRequest;
-    const carrier = item.type === "realized_vol" || item.type === "spot"
-      ? "3M K/F 100% reference response carrier"
-      : item.type === "forward" ? "selected maturity + K/F 100% response carrier" : "exact requested IV coordinate";
-    $("methodologyContent").innerHTML = definitionGrid([
-      ["Selected indicator", indicatorLabel(item)], ["Request coordinate", coordinateRequestLabel(request)],
-      ["Vol convention", request.volatility_convention], ["Layout", request.layout], ["Data carrier", carrier],
-      ["IV", method.ivLabel], ["RV", method.rvLabel], ["RV formula", method.rvFormula],
-      ["Annualization", `${method.annualization} trading sessions`], ["Spot", method.spotNote],
-      ["Corporate action adjustment", method.corporateActionAdjustment],
-      ["Provider", `${data.source.provider} · API ${data.source.apiVersion}`], ["Retrieved at", data.source.retrievedAt],
-    ]);
+    const audit = data.requestAudit;
+    const upstream = audit?.upstreamRequests || [];
+    const sentCount = upstream.filter((entry) => entry.sentToUpstream).length;
+    const displayRange = `${request.start_date} → ${request.end_date}`;
+    const firstBody = upstream[0]?.body;
+    const fetchRange = firstBody?.startDate && firstBody?.endDate
+      ? `${firstBody.startDate} → ${firstBody.endDate}`
+      : displayRange;
+    $("methodologyContent").innerHTML = `
+      ${definitionGrid([
+        ["Selected indicator", indicatorLabel(item)],
+        ["Requested coordinate", coordinateRequestLabel(request)],
+        ["Display range", displayRange],
+        ["Effective fetch range", fetchRange],
+        ["Source mode", String(data.source.cacheStatus || "unknown").toUpperCase()],
+        ["Actual upstream calls", String(sentCount)],
+        ["Provider", `${data.source.provider} · API ${data.source.apiVersion}`],
+        ["Retrieved at", data.source.retrievedAt],
+        ["Request ID", data.requestId],
+      ])}
+      ${fetchRange !== displayRange ? '<p class="request-range-note">后台为 RV warm-up / forward-tail 覆盖扩大了取数日期；展示日期范围没有改变。</p>' : ""}
+      ${renderRequestAudit(audit)}
+    `;
+  }
+
+  function renderRequestAudit(audit) {
+    if (!audit?.upstreamRequests?.length) {
+      return '<div class="request-audit-empty">当前响应没有 request audit；重启到新后端版本后可查看实际 Cortex wire body。</div>';
+    }
+    const cards = audit.upstreamRequests.map((entry, index) => {
+      const sent = entry.sentToUpstream;
+      const disposition = String(entry.disposition || "unknown").toUpperCase();
+      const note = sent
+        ? "本次实际发送给 Cortex DataHub。"
+        : disposition === "FIXTURE"
+          ? "本次使用离线 fixture，没有调用 Cortex。"
+          : "本次没有调用 Cortex；该有效请求由缓存满足。";
+      return `<article class="request-audit-card ${sent ? "is-live" : "is-cache"}">
+        <div class="request-audit-card-head">
+          <div><small>BNP API REQUEST ${index + 1}</small><strong>POST /v1/implied-volatility</strong></div>
+          <span class="request-mode-badge">${escapeHtml(sent ? "LIVE · SENT" : disposition)}</span>
+        </div>
+        <p>${escapeHtml(note)}</p>
+        <details><summary>查看 wire JSON</summary><pre>${escapeHtml(JSON.stringify(entry.body || {}, null, 2))}</pre></details>
+      </article>`;
+    }).join("");
+    return `<div class="request-audit">
+      <div class="request-audit-title"><strong>后台请求审计</strong><span>序列化后的 Cortex body；不包含 token / secret。</span></div>
+      <details class="user-request-json"><summary>查看用户显示范围 request JSON</summary><pre>${escapeHtml(JSON.stringify(audit.userRequestBody || {}, null, 2))}</pre></details>
+      <div class="request-audit-grid">${cards}</div>
+    </div>`;
   }
 
   function renderIndicatorDetailQuality(item) {
-    const quality = item.response.dataQuality;
-    $("qualityStatus").textContent = quality.status;
-    const counts = [["Observations", quality.observationCount], ["Usable IV", quality.usableIvCount], ["Invalid IV", quality.invalidIvCount]];
-    const flags = Object.entries(quality.flagCounts || {});
-    $("qualityContent").innerHTML = `<div class="quality-counts">${counts.map(([label, value]) => `<div class="quality-count"><small>${escapeHtml(label)}</small><strong>${formatNumber(value, 0)}</strong></div>`).join("")}</div>
-      <div class="quality-flags">${flags.length ? flags.map(([flag, count]) => `<span class="flag-chip">${escapeHtml(flag)} · ${count}</span>`).join("") : '<span class="flag-chip">OK · no flags</span>'}</div>
-      <p class="inline-note">${escapeHtml(quality.analyticsExclusionPolicy)}</p>`;
+    const data = item.response;
+    const q = data.dataQuality;
+    const issues = Array.isArray(data.issues) ? data.issues : deriveIssuesFromSeries(item);
+    const warn = issues.filter((issue) => issue.severity !== "info").length;
+    const info = issues.length - warn;
+    $("qualityStatus").textContent = issues.length ? `${warn} WARN · ${info} INFO` : "OK";
+    $("qualityStatus").classList.toggle("is-warning", issues.length > 0);
+    const counts = `<div class="quality-counts">
+      ${[["Observations", q.observationCount], ["Usable IV", q.usableIvCount], ["Invalid IV", q.invalidIvCount]]
+        .map(([label, value]) => `<div class="quality-count"><small>${escapeHtml(label)}</small><strong>${formatNumber(value, 0)}</strong></div>`).join("")}
+    </div>`;
+    if (!issues.length) {
+      $("qualityContent").innerHTML = `${counts}<div class="quality-ok-state"><strong>✓ No data-quality issues detected</strong><span>${formatNumber(q.observationCount, 0)} displayed observations · no flags</span></div>`;
+      return;
+    }
+    $("qualityContent").innerHTML = `${counts}
+      <div class="quality-issue-summary"><strong>${issues.length} 项需要查看</strong><span>这里只列本次请求实际触发的 flag。通用处理规则在「方法与数据规则」。</span></div>
+      <div class="quality-issue-list">${issues.map(issueCardHtml).join("")}</div>`;
+  }
+
+  function deriveIssuesFromSeries(item) {
+    const request = item.request.volatilityRequest;
+    return (item.response.series || []).flatMap((point) =>
+      (point.qualityFlags || []).filter((code) => code !== "OK").map((code) => ({
+        severity: ["INSUFFICIENT_HISTORY", "DUPLICATE_IDENTICAL_REMOVED", "SOURCE_ORDER_CORRECTED"].includes(code) ? "info" : "warning",
+        code,
+        instrumentCode: request.code,
+        date: point.date,
+        coordinate: coordinateRequestLabel(request),
+        rawImpliedVol: point.rawImpliedVol,
+        impliedVol: point.impliedVol,
+        realizedVol: point.realizedVol,
+        spot: point.spot,
+        forward: point.forward,
+        action: "请在 Observation table 查看该日期完整字段。",
+      }))
+    );
+  }
+
+  function issueCardHtml(issue) {
+    const values = [];
+    const code = String(issue.code || "");
+    if (code.includes("IV")) {
+      values.push(["Raw IV", issue.rawImpliedVol === null || issue.rawImpliedVol === undefined ? "—" : `${issue.rawImpliedVol}%`]);
+      values.push(["Effective IV", issue.impliedVol === null || issue.impliedVol === undefined ? "—" : `${issue.impliedVol}%`]);
+    }
+    if (["RETURN_OUTLIER", "MISSING_SPOT"].includes(code)) values.push(["Spot", issue.spot ?? "—"]);
+    if (code === "MISSING_FORWARD") values.push(["Forward", issue.forward ?? "—"]);
+    if (code === "INSUFFICIENT_HISTORY") values.push(["RV", issue.realizedVol === null || issue.realizedVol === undefined ? "—" : `${issue.realizedVol}%`]);
+    return `<article class="quality-issue ${issue.severity === "info" ? "is-info" : "is-warning"}">
+      <div class="quality-issue-head"><span>${escapeHtml(issue.severity === "info" ? "INFO" : "WARNING")}</span><strong>${escapeHtml(code)}</strong></div>
+      <div class="quality-issue-meta"><b>${escapeHtml(issue.instrumentCode || "—")}</b><b>${escapeHtml(issue.date || "—")}</b><span>${escapeHtml(issue.coordinate || "—")}</span></div>
+      ${values.length ? `<div class="quality-issue-values">${values.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(String(value))}</strong></span>`).join("")}</div>` : ""}
+      <p>${escapeHtml(issue.action || "保留质量标记，建议复核。")}</p>
+      <button class="text-button issue-locate-button" type="button" data-issue-date="${escapeHtml(issue.date || "")}">定位到 Observation</button>
+    </article>`;
+  }
+
+  function handleQualityIssueClick(event) {
+    const button = event.target.closest("[data-issue-date]");
+    if (!button) return;
+    const date = button.dataset.issueDate;
+    const row = Array.from(document.querySelectorAll("#resultTableBody tr"))
+      .find((candidate) => candidate.dataset.observationDate === date);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("is-quality-focus");
+    window.setTimeout(() => row.classList.remove("is-quality-focus"), 1800);
   }
 
   function renderIndicatorDetailActivity(item) {
-    $("activityList").innerHTML = item.response.activity.map((event) => `<li><span class="activity-stage">${escapeHtml(event.stage)}</span><div class="activity-message"><strong>${escapeHtml(event.code)}${event.affectedObservations ? ` · ${formatNumber(event.affectedObservations, 0)}` : ""}</strong><p>${escapeHtml(event.message)}</p>${event.suggestedAction ? `<p class="activity-action">建议：${escapeHtml(event.suggestedAction)}</p>` : ""}</div></li>`).join("");
+    const events = item.response.activity || [];
+    const normal = new Set([
+      "REQUEST_VALIDATED", "FIXTURE_LOADED", "CACHE_HIT", "UPSTREAM_FETCH_STARTED",
+      "UPSTREAM_FETCH_COMPLETED", "SCHEMA_VALIDATED", "COORDINATES_RESOLVED",
+      "ANALYTICS_COMPLETED", "BROWSER_RENDER_READY",
+    ]);
+    const noteworthy = events.filter((event) => !normal.has(event.code));
+    const details = $("activityDetails");
+    if (details) details.open = noteworthy.length > 0;
+    if ($("activityDetailsSummary")) {
+      $("activityDetailsSummary").textContent = noteworthy.length
+        ? `执行记录 · ${noteworthy.length} 项需关注`
+        : `执行记录 · ${events.length} steps · 正常`;
+    }
+    $("activityList").innerHTML = events.map((event) => `<li class="${normal.has(event.code) ? "" : "is-noteworthy"}"><span class="activity-stage">${escapeHtml(event.stage)}</span><div class="activity-message"><strong>${escapeHtml(event.code)}${event.affectedObservations ? ` · ${formatNumber(event.affectedObservations, 0)}` : ""}</strong><p>${escapeHtml(event.message)}</p>${event.suggestedAction ? `<p class="activity-action">建议：${escapeHtml(event.suggestedAction)}</p>` : ""}</div></li>`).join("");
+  }
+
+  function renderIndicatorDetailRules(item) {
+    const method = item.response.methodology;
+    const host = $("methodologyRulesContent");
+    if (!host) return;
+    host.innerHTML = definitionGrid([
+      ["IV definition", method.ivLabel],
+      ["RV definition", method.rvLabel],
+      ["RV formula", method.rvFormula],
+      ["RV window", `${method.rvWindowSessions} trading sessions · ${method.rvAlignment}`],
+      ["Annualization", `${method.annualization} trading sessions`],
+      ["Spot / RV source", method.spotNote],
+      ["Corporate action adjustment", method.corporateActionAdjustment],
+    ]);
   }
 
   function renderIndicatorDetailDisclosures(item) {
-    const context = new Set(["compare", "implied_vol", "source_metadata", "upstream_fetch", "cache", "csv", item.type]);
-    const disclosures = item.response.disclosures || [];
-    for (const [surface, id] of Object.entries(FRONTEND_SURFACE_IDS)) {
-      if (surface === "query_builder") continue;
-      renderDisclosureEntries($(id), applicableDisclosures(disclosures, context, surface));
+    for (const id of ["methodologyDisclosures", "qualityDisclosures", "activityDisclosures"]) {
+      const old = $(id);
+      if (old) old.innerHTML = "";
     }
+    const host = $("methodologyRulesDisclosures");
+    if (!host) return;
+    const context = new Set(["compare", "implied_vol", "source_metadata", "upstream_fetch", "cache", "csv", "health", "request_builder", item.type]);
+    const entries = (item.response.disclosures || []).filter((entry) =>
+      !Array.isArray(entry.appliesTo) || !entry.appliesTo.length || entry.appliesTo.some((token) => context.has(token))
+    );
+    host.innerHTML = entries.map((entry) => `<details class="rule-entry">
+      <summary><span>${escapeHtml(entry.title)}</span><small>${escapeHtml(entry.category || "rule")}</small></summary>
+      <p>${escapeHtml(entry.summary || "")}</p>
+      ${entry.details?.length ? `<ul>${entry.details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}</ul>` : ""}
+    </details>`).join("");
   }
 
   function renderIndicatorDetailWarnings(item) {
@@ -3083,3 +3547,13 @@
   window.volcurveCompareDetails = { downloadSelectedCsv };
   window.addEventListener("DOMContentLoaded", initIndicatorBuilder);
 })();
+
+  // VOLCURVE_LOOKBACK_INPUT_V1_5
+
+  // VOLCURVE_DIRECT_LISTED_EXPIRY_V1_7
+
+  // VOLCURVE_ABS_STRIKE_PICKER_V1_8
+
+  // VOLCURVE_LISTED_DATE_RACE_FIX_V1_8_1
+
+  // VOLCURVE_LISTED_DATE_KEYBOARD_FIX_V1_8_2

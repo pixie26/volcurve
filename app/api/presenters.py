@@ -6,12 +6,16 @@ import math
 from collections import Counter
 
 from app.clients.cortex.errors import CortexError, ErrorCode
+from app.clients.cortex.serializers import serialize_volatility_request
 from app.domain.disclosures import DISCLOSURES, LARGE_SURFACE_POINT_WARNING
 from app.domain.observations import QualityFlag
 from app.domain.requests import VolatilityRequest
 from app.domain.responses import (
     ActivityEvent,
     CompareResponse,
+    DataIssue,
+    RequestAudit,
+    UpstreamRequestAudit,
     CompareSummary,
     Methodology,
     SeriesPoint,
@@ -117,6 +121,80 @@ def _fetch_activity(fetch_results) -> list[ActivityEvent]:
     return events
 
 
+
+_ISSUE_INFO_CODES = {
+    QualityFlag.INSUFFICIENT_HISTORY.value,
+    QualityFlag.DUPLICATE_IDENTICAL_REMOVED.value,
+    QualityFlag.SOURCE_ORDER_CORRECTED.value,
+}
+
+_ISSUE_ACTIONS = {
+    QualityFlag.INSUFFICIENT_HISTORY.value: "RV 保持为空；不填充。检查历史覆盖或等待更多有效市场日期。",
+    QualityFlag.MISSING_SPOT.value: "Spot 保持为空；不做前向填充，依赖 Spot 的统计不使用该点。",
+    QualityFlag.MISSING_IV.value: "IV 保持为空；不使用邻近 maturity/strike 替代。",
+    QualityFlag.MISSING_FORWARD.value: "Forward 保持为空；不使用邻近期限替代。",
+    QualityFlag.MATURITY_MISMATCH.value: "返回期限与请求期限不一致；该点保持为空，不做最近期限替代。",
+    QualityFlag.STRIKE_MISMATCH.value: "返回 strike 与请求 strike 不一致；该点保持为空，不做最近 strike 替代。",
+    QualityFlag.DUPLICATE_IDENTICAL_REMOVED.value: "完全相同的同日重复记录已去重；数值未改写。",
+    QualityFlag.SOURCE_ORDER_CORRECTED.value: "上游日期顺序已标准化为升序；原始数值未改写。",
+    QualityFlag.INVALID_IV_ZERO.value: "raw IV 保留；effective IV 置空并从统计中排除。",
+    QualityFlag.INVALID_IV_NEGATIVE.value: "raw IV 保留；effective IV 置空并从统计中排除。",
+    QualityFlag.INVALID_IV_NON_FINITE.value: "raw IV 保留为审计值；effective IV 置空并从统计中排除。",
+    QualityFlag.SUSPICIOUS_IV_EXTREME.value: "正 IV 保留并参与计算，同时标记供人工复核。",
+    QualityFlag.RETURN_OUTLIER.value: "Spot 原值保留；只标记异常收益，不自动认定或调整公司行动。",
+    QualityFlag.STALE_DATA.value: "保留 stale 标记；如需确认最新值，请执行强制刷新。",
+    QualityFlag.SCHEMA_WARNING.value: "保留 schema warning；建议检查对应日期的上游响应。",
+}
+
+
+def _request_audit(request: VolatilityRequest, fetch_results) -> RequestAudit:
+    user_body = serialize_volatility_request(request)
+    entries = []
+    for result in fetch_results:
+        disposition = result.cache_status
+        entries.append(
+            UpstreamRequestAudit(
+                disposition=disposition,
+                sentToUpstream=disposition == "live",
+                correlationId=result.correlation_id,
+                body=getattr(result, "request_body", None) or user_body,
+            )
+        )
+    return RequestAudit(userRequestBody=user_body, upstreamRequests=entries)
+
+
+def _data_issues(request: VolatilityRequest, first_observation, series: list[SeriesPoint]) -> list[DataIssue]:
+    coordinate = iv_label(
+        first_observation.target_maturity,
+        first_observation.strike_rule,
+        first_observation.target_strike,
+    )
+    issues = []
+    for point in series:
+        for code in point.qualityFlags:
+            if code == QualityFlag.OK.value:
+                continue
+            issues.append(
+                DataIssue(
+                    severity="info" if code in _ISSUE_INFO_CODES else "warning",
+                    code=code,
+                    instrumentCode=request.code,
+                    date=point.date,
+                    coordinate=coordinate,
+                    rawImpliedVol=point.rawImpliedVol,
+                    impliedVol=point.impliedVol,
+                    realizedVol=point.realizedVol,
+                    spot=point.spot,
+                    forward=point.forward,
+                    action=_ISSUE_ACTIONS.get(
+                        code,
+                        "保留该质量标记；请在 Observation table 查看该日期的完整字段。",
+                    ),
+                )
+            )
+    return issues
+
+
 def build_compare_response(
     *, request_id: str, client, request: VolatilityRequest, execution: CompareExecution
 ) -> CompareResponse:
@@ -205,6 +283,8 @@ def build_compare_response(
         dataQuality=quality,
         activity=activity,
         disclosures=list(DISCLOSURES),
+        requestAudit=_request_audit(request, execution.load.fetch_results),
+        issues=_data_issues(request, first_observation, series),
     )
 
 

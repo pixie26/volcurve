@@ -10,6 +10,7 @@
     <script defer src="/static/vendor/plotly-5.24.1.min.js"></script>
     <script defer src="/static/app.js?v={{ASSET_VERSION}}"></script>
     <script defer src="/static/compare-builder.js?v={{ASSET_VERSION}}"></script>
+    <script defer src="/static/cortex-playground.js?v={{ASSET_VERSION}}"></script>
   </head>
   <body>
     <header class="topbar">
@@ -40,18 +41,13 @@
 
       <div class="topbar-meta">
         <span id="apiVersion" class="api-version">API —</span>
+        <a class="playground-jump" href="#cortexPlayground">Raw API</a>
         <span id="healthStatus" class="status-pill status-neutral"><i></i>检查连接中</span>
       </div>
     </header>
 
     <div class="app-shell">
       <aside class="query-rail" aria-label="查询条件">
-        <div class="rail-heading">
-          <p class="eyebrow">QUERY BUILDER</p>
-          <h1>构建时序指标</h1>
-          <p>先确定标的与时间，再逐个添加、启用或删除指标。</p>
-        </div>
-
         <form id="queryForm" novalidate>
           <fieldset class="segmented" aria-label="查询类型">
             <label><input type="radio" name="queryKind" value="compare" checked /><span>Time series</span></label>
@@ -59,23 +55,21 @@
           </fieldset>
 
           <section class="form-section">
-            <div class="section-heading-row"><h2>1 · 日期范围</h2><span class="step-badge">全局</span></div>
             <div class="field-grid two">
-              <label class="field"><span>范围类型</span><select id="dateMode">
-                <option value="sliding">滚动窗口</option>
-                <option value="fixed">固定日期</option>
+              <label class="field"><span>Range mode</span><select id="dateMode">
+                <option value="sliding">Sliding window</option>
+                <option value="fixed">Fixed dates</option>
               </select></label>
-              <label id="slidingWindowField" class="field"><span>窗口长度</span><select id="slidingWindow"></select></label>
+              <label id="slidingWindowField" class="field"><span>Lookback</span><input id="slidingWindow" value="1Y" list="slidingWindowOptions" autocomplete="off" spellcheck="false" placeholder="e.g. 52d, 2w, 3m, 3y" /><datalist id="slidingWindowOptions"></datalist><small>可输入任意正整数 + d / w / m / y，或 YTD；这里是自然日历回溯，不是 trading sessions。</small></label>
             </div>
             <div class="field-grid two">
-              <label class="field"><span>开始日期</span><input id="startDate" type="date" required /></label>
-              <label class="field"><span>结束日期</span><input id="endDate" type="date" required /></label>
+              <label class="field"><span>Start date</span><input id="startDate" type="date" required /></label>
+              <label class="field"><span>End date</span><input id="endDate" type="date" required /></label>
             </div>
             <small id="dateModeNote"></small>
           </section>
 
           <section class="form-section">
-            <div class="section-heading-row"><h2>2 · Underlying 与坐标</h2><span class="step-badge">新指标</span></div>
             <label id="underlyingField" class="field field-wide">
               <span>Underlying · instrument code</span>
               <div class="input-action">
@@ -86,22 +80,22 @@
               <small id="instrumentHelp">输入代码或名称后按 Enter 或点 ⌕ 搜索，再从结果里点选。新 indicator 直接使用此标的；已保存 indicator 保留自己的标的，要整批换标的请用下方「批量」。当前 catalogue 仅 equity。</small>
             </label>
             <label id="chartLaneField" class="field field-wide">
-              <span>放到哪个坐标</span>
+              <span>Target chart</span>
               <select id="draftChartLane" data-draft="chartLane"></select>
               <small>新 indicator 落在此坐标；保存后仍可在指标卡片中移动。</small>
             </label>
           </section>
 
           <section id="indicatorBuilder" class="form-section indicator-builder">
-            <div class="section-heading-row"><h2>3 · Indicator builder</h2><span id="indicatorCount" class="mini-badge">0</span></div>
+            <div class="section-heading-row"><h2>Indicator builder</h2><span id="indicatorCount" class="mini-badge">0</span></div>
             <label class="field field-wide">
               <span>Indicator</span>
               <select id="indicatorType">
                 <option value="implied_vol">Implied volatility</option>
                 <option value="realized_vol">Realized volatility</option>
-                <option value="spot">Spot · 原始未复权</option>
+                <option value="spot">Spot</option>
                 <option value="forward">Forward</option>
-                <option value="derived">Derived · 指标之间 ＋ − × ÷</option>
+                <option value="derived">Derived</option>
               </select>
             </label>
             <div id="indicatorConfig"></div>
@@ -164,15 +158,15 @@
           <section class="form-section">
             <h2>IV 坐标</h2>
             <label class="field field-wide"><span>请求模式</span><select id="requestMode"></select></label>
-            <div class="field-grid two">
-              <label class="field"><span>Vol convention</span><select id="volConvention"><option value="bsVol">Black-Scholes</option><option value="bnppVol">供应商约定</option></select></label>
-              <label class="field"><span>Layout</span><select id="layout"><option value="matrix">Matrix</option><option value="vector">Vector</option></select></label>
+            <div class="is-hidden" aria-hidden="true">
+              <select id="volConvention" tabindex="-1"><option value="bsVol" selected>Black-Scholes</option></select>
+              <select id="layout" tabindex="-1"><option value="matrix" selected>Matrix</option></select>
             </div>
             <div id="maturityRuleRow" class="field-grid two is-hidden">
               <label class="field field-wide"><span>Maturity rule</span><select id="maturityRule"><option value="fixed">Fixed expiry</option><option value="listed">Listed expiry</option></select></label>
             </div>
             <div id="strikeRuleRow" class="field-grid two">
-              <label class="field field-wide"><span>Strike convention</span><select id="strikeRule"><option value="relative_to_forward">K/F · forward</option><option value="relative_to_spot_ref">K/S · spot reference</option></select></label>
+              <label class="field field-wide"><span>Strike convention</span><select id="strikeRule"><option value="relative_to_forward">Fwd</option><option value="relative_to_spot_ref">Spot</option></select></label>
             </div>
             <div id="coordinateFields"></div>
             <p id="coordinateModeNote" class="inline-note"></p>
@@ -198,10 +192,6 @@
           </div>
         </form>
 
-        <details class="builder-disclosures">
-          <summary>查询限制与假设 <span id="builderDisclosureCount"></span></summary>
-          <div id="queryBuilderDisclosures" class="disclosure-list"></div>
-        </details>
       </aside>
 
       <main class="workspace">
@@ -293,15 +283,49 @@
           </section>
 
           <div class="detail-grid">
-            <section id="methodologyPanel" class="panel detail-panel"><div class="panel-heading"><div><p class="eyebrow">METHODOLOGY</p><h3>定义与口径</h3></div></div><div id="methodologyContent"></div><div id="methodologyDisclosures" class="disclosure-list"></div></section>
+            <section id="methodologyPanel" class="panel detail-panel"><div class="panel-heading"><div><p class="eyebrow">REQUEST &amp; SOURCE</p><h3>请求与来源</h3></div></div><div id="methodologyContent"></div><div id="methodologyDisclosures" class="disclosure-list"></div></section>
             <section id="qualityPanel" class="panel detail-panel"><div class="panel-heading"><div><p class="eyebrow">DATA QUALITY</p><h3>质量状态</h3></div><span id="qualityStatus" class="outline-badge">—</span></div><div id="qualityContent"></div><div id="qualityDisclosures" class="disclosure-list"></div></section>
           </div>
 
-          <section id="activityPanel" class="panel activity-panel"><div class="panel-heading"><div><p class="eyebrow">ACTIVITY CONSOLE</p><h3>后台执行记录</h3></div><span id="requestIdBadge">—</span></div><ol id="activityList" class="activity-list"></ol><div id="activityDisclosures" class="disclosure-list"></div></section>
+          <details id="methodologyRules" class="panel methodology-rules-panel">
+            <summary><span><small>METHODOLOGY &amp; RULES</small><strong>方法与数据规则</strong></span><em>按需查看</em></summary>
+            <div id="methodologyRulesContent" class="methodology-rules-content"></div>
+            <div id="methodologyRulesDisclosures" class="rules-disclosure-list"></div>
+          </details>
+
+          <section id="activityPanel" class="panel activity-panel"><div class="panel-heading"><div><p class="eyebrow">ACTIVITY CONSOLE</p><h3>后台执行记录</h3></div><span id="requestIdBadge">—</span></div><details id="activityDetails" class="activity-details">
+  <summary id="activityDetailsSummary">查看本次执行步骤</summary>
+  <ol id="activityList" class="activity-list"></ol>
+</details><div id="activityDisclosures" class="disclosure-list"></div></section>
         </section>
+
+        <details id="cortexPlayground" class="panel cortex-playground">
+          <summary class="cortex-playground-summary">
+            <div><p class="eyebrow">CORTEX PLAYGROUND</p><h3>Raw implied-volatility request</h3></div>
+            <span class="outline-badge">LIVE · NO CACHE</span>
+          </summary>
+          <div class="cortex-playground-body">
+            <div class="cortex-playground-endpoint"><span>Endpoint</span><code>POST /v1/implied-volatility</code></div>
+            <p class="cortex-playground-note">直接编辑 JSON 并发送。请求绕过应用层 cache、parser 和 normalized storage；认证信息仍只存在后端。</p>
+            <label class="cortex-playground-editor"><span>Request JSON</span><textarea id="playgroundRequest" spellcheck="false" autocomplete="off"></textarea></label>
+            <div class="cortex-playground-actions">
+              <button id="playgroundFormat" class="secondary-button" type="button">Format JSON</button>
+              <button id="playgroundReset" class="secondary-button" type="button">Reset</button>
+              <button id="playgroundSend" class="primary-button playground-send" type="button"><span>Send live</span><strong>→</strong></button>
+            </div>
+            <div class="cortex-playground-response-heading">
+              <div><span>Response</span><small id="playgroundStatus">Not sent.</small></div>
+              <button id="playgroundCopy" class="text-button" type="button">Copy response</button>
+            </div>
+            <pre id="playgroundResponse" class="cortex-playground-response"></pre>
+          </div>
+        </details>
+
       </main>
     </div>
 
     <noscript>此页面需要 JavaScript 才能构建查询和渲染图表。</noscript>
   </body>
 </html>
+
+<!-- VOLCURVE_CORTEX_PLAYGROUND_V1_6 -->

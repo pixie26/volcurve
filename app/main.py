@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.capabilities import router as capabilities_router
+from app.api.cortex_playground import router as cortex_playground_router
 from app.api.errors import install_error_handlers
 from app.api.exports import router as exports_router
 from app.api.health import router as health_router
@@ -36,6 +37,7 @@ async def request_id_middleware(request: Request, call_next):
 
 install_error_handlers(app)
 app.include_router(capabilities_router)
+app.include_router(cortex_playground_router)
 app.include_router(instruments_router)
 app.include_router(compare_router)
 app.include_router(surface_router)
@@ -54,7 +56,7 @@ def _asset_version() -> str:
     silently never runs. Stamping the URLs makes each version a distinct resource.
     """
     newest = 0.0
-    for name in ("index.html", "app.js", "compare-builder.js", "styles.css"):
+    for name in ("index.html", "app.js", "compare-builder.js", "cortex-playground.js", "styles.css"):
         path = WEB_ROOT / name
         if path.exists():
             newest = max(newest, path.stat().st_mtime)
@@ -69,3 +71,5 @@ def web_app() -> HTMLResponse:
     # The HTML is the only thing that carries the current version, so it must never be the
     # stale half of the pair.
     return HTMLResponse(html, headers={"Cache-Control": "no-cache, must-revalidate"})
+
+# VOLCURVE_CORTEX_PLAYGROUND_V1_6

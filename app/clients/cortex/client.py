@@ -69,6 +69,7 @@ class FetchResult:
     cache_status: str
     correlation_id: str
     retrieved_at: datetime
+    request_body: dict | None = None
 
 
 def load_api_version(project_root: Path) -> str:
@@ -327,6 +328,9 @@ class CortexClient:
                     policy=policy,
                 )
 
+        # Authoritative serializer output for this effective fetch.  When the result
+        # is cache/fixture it describes what this run needed, but was not sent upstream.
+        result.request_body = wire_body
         return request_hash, request_json, policy, result
 
     def _fetch_and_store(

@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.domain.disclosures import Disclosure
 from app.domain.instruments import Instrument
@@ -186,6 +186,35 @@ def build_quality_contract(
     return summary, events
 
 
+
+class UpstreamRequestAudit(BaseModel):
+    method: str = "POST"
+    endpoint: str = "/v1/implied-volatility"
+    disposition: str
+    sentToUpstream: bool
+    correlationId: str
+    body: dict[str, object]
+
+
+class RequestAudit(BaseModel):
+    userRequestBody: dict[str, object]
+    upstreamRequests: list[UpstreamRequestAudit] = Field(default_factory=list)
+
+
+class DataIssue(BaseModel):
+    severity: Literal["warning", "info"]
+    code: str
+    instrumentCode: str
+    date: date
+    coordinate: str
+    rawImpliedVol: float | str | None = None
+    impliedVol: float | None = None
+    realizedVol: float | None = None
+    spot: float | None = None
+    forward: float | None = None
+    action: str
+
+
 class CompareResponse(BaseModel):
     requestId: str
     series: list[SeriesPoint]
@@ -195,6 +224,8 @@ class CompareResponse(BaseModel):
     dataQuality: DataQualitySummary
     activity: list[ActivityEvent]
     disclosures: list[Disclosure]
+    requestAudit: RequestAudit | None = None
+    issues: list[DataIssue] = Field(default_factory=list)
 
 
 class InstrumentSearchResponse(BaseModel):

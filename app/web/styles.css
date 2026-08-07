@@ -212,7 +212,7 @@ button { color: inherit; }
 .timeseries-heading h2 { margin: 2px 0 6px; font-family: Georgia, "Noto Serif SC", serif; font-size: 30px; font-weight: 500; }
 .timeseries-heading p:last-child { margin: 0; color: var(--muted); font-size: 12px; }
 .timeseries-actions { display: flex; align-items: center; gap: 8px; }
-.crosshair-readout { position: sticky; top: 84px; z-index: 6; display: flex; align-items: flex-start; gap: 18px; margin-bottom: 14px; padding: 12px 16px; background: var(--panel); border: 1px solid #bedac9; border-radius: 12px; box-shadow: var(--shadow); }
+.crosshair-readout { position: sticky; top: 84px; z-index: 6; display: flex; align-items: flex-start; gap: 18px; margin-bottom: 14px; padding: 12px 16px; background: rgba(255,254,249,.78); border: 1px solid rgba(190,218,201,.78); border-radius: 12px; box-shadow: 0 8px 24px rgba(23,33,28,.07); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
 .readout-date { flex: 0 0 auto; padding-right: 16px; border-right: 1px solid var(--line); }
 .readout-date small { display: block; color: var(--green); font-size: 9px; font-weight: 800; letter-spacing: .12em; }
 .readout-date strong { display: block; margin-top: 4px; font-family: Georgia, serif; font-size: 17px; font-weight: 500; white-space: nowrap; }
@@ -425,4 +425,129 @@ tr:hover td { background: #f7f8f3; }
   .crosshair-readout { position: static; flex-direction: column; gap: 10px; }
   .readout-date { padding-right: 0; border-right: 0; }
   .readout-lane li span { max-width: 180px; }
+}
+
+
+/* VOLCURVE_REQUEST_QUALITY_REDESIGN_V1_2 */
+#methodologyDisclosures, #qualityDisclosures, #activityDisclosures { display: none !important; }
+
+.request-range-note { margin: 14px 0 0; padding: 9px 11px; color: #315846; background: #edf5ef; border-left: 3px solid var(--green); border-radius: 6px; font-size: 10px; line-height: 1.5; }
+.request-audit { margin-top: 18px; }
+.request-audit-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.request-audit-title strong { font-size: 11px; }
+.request-audit-title span { color: var(--muted); font-size: 9px; }
+.request-audit-grid { display: grid; gap: 9px; margin-top: 9px; }
+.request-audit-card { padding: 11px 12px; background: #f7f8f4; border: 1px solid var(--line); border-radius: 9px; }
+.request-audit-card.is-live { border-left: 3px solid var(--green); }
+.request-audit-card.is-cache { border-left: 3px solid #9aa79f; }
+.request-audit-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.request-audit-card-head small { display: block; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; }
+.request-audit-card-head strong { display: block; margin-top: 2px; font-size: 10px; }
+.request-audit-card > p { margin: 7px 0; color: var(--muted); font-size: 9px; }
+.request-mode-badge { flex: none; padding: 4px 6px; color: var(--green-dark); background: #e7f1e9; border-radius: 999px; font-size: 8px; font-weight: 850; }
+.request-audit-card summary, .user-request-json summary { color: var(--green-dark); cursor: pointer; font-size: 9px; font-weight: 800; }
+.request-audit-card pre, .user-request-json pre { max-height: 270px; overflow: auto; margin: 8px 0 0; padding: 10px; color: #27332c; background: #eef1eb; border: 1px solid #d8ddd5; border-radius: 7px; font: 9px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.request-audit-empty { margin-top: 12px; padding: 10px; color: var(--muted); background: #f3f4f0; border-radius: 8px; font-size: 9px; }
+
+#qualityStatus.is-warning { color: #934e13; border-color: #e1ae78; background: #fff3e5; }
+.quality-ok-state { display: grid; gap: 3px; margin-top: 13px; padding: 12px; color: #245842; background: #edf6f0; border: 1px solid #cce2d3; border-radius: 9px; }
+.quality-ok-state strong { font-size: 11px; }
+.quality-ok-state span { color: #567265; font-size: 9px; }
+.quality-issue-summary { display: grid; gap: 3px; margin: 13px 0 9px; padding: 10px 11px; background: #fff5e9; border: 1px solid #efd0aa; border-radius: 8px; }
+.quality-issue-summary strong { font-size: 11px; }
+.quality-issue-summary span { color: #775f45; font-size: 9px; line-height: 1.45; }
+.quality-issue-list { display: grid; gap: 8px; }
+.quality-issue { padding: 11px 12px; background: #fffaf4; border: 1px solid #ecd7bb; border-left: 3px solid var(--orange); border-radius: 8px; }
+.quality-issue.is-info { background: #f4f7f3; border-color: #d8e0d7; border-left-color: #7f9d8d; }
+.quality-issue-head { display: flex; align-items: center; gap: 8px; }
+.quality-issue-head span { padding: 2px 5px; color: #7d430f; background: #ffe5c7; border-radius: 4px; font-size: 7px; font-weight: 850; }
+.quality-issue.is-info .quality-issue-head span { color: #355f4c; background: #e3ece5; }
+.quality-issue-head strong { font-size: 10px; }
+.quality-issue-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.quality-issue-meta b { color: #34423a; }
+.quality-issue-values { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.quality-issue-values > span { min-width: 90px; padding: 6px 8px; background: rgba(255,255,255,.75); border: 1px solid #e1e5de; border-radius: 6px; }
+.quality-issue-values small { display: block; color: var(--muted); font-size: 7px; }
+.quality-issue-values strong { display: block; margin-top: 2px; font-size: 9px; }
+.quality-issue > p { margin: 8px 0 4px; color: #5b5145; font-size: 9px; line-height: 1.5; }
+#resultTableBody tr.is-quality-focus td { background: #fff1d8; transition: background .25s ease; }
+
+.methodology-rules-panel { margin-bottom: 16px; overflow: hidden; }
+.methodology-rules-panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 18px; cursor: pointer; list-style: none; }
+.methodology-rules-panel > summary::-webkit-details-marker { display: none; }
+.methodology-rules-panel > summary span small { display: block; color: var(--green); font-size: 9px; font-weight: 800; letter-spacing: .1em; }
+.methodology-rules-panel > summary span strong { display: block; margin-top: 3px; font-size: 14px; }
+.methodology-rules-panel > summary em { color: var(--muted); font-size: 9px; font-style: normal; }
+.methodology-rules-content { padding: 16px 18px; border-top: 1px solid #e6e9e1; }
+.rules-disclosure-list { display: grid; gap: 7px; padding: 0 18px 18px; }
+.rule-entry { background: #f5f6f2; border: 1px solid #e0e4dc; border-radius: 8px; }
+.rule-entry > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; cursor: pointer; list-style: none; }
+.rule-entry > summary::-webkit-details-marker { display: none; }
+.rule-entry > summary span { font-size: 10px; font-weight: 800; }
+.rule-entry > summary small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.rule-entry > p { margin: 0; padding: 0 11px 8px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.rule-entry > ul { margin: 0; padding: 0 24px 10px 30px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+
+.activity-details { margin: 0; }
+.activity-details > summary { margin: 0 18px 12px; padding: 8px 10px; color: var(--green-dark); background: #f2f5f0; border: 1px solid #d9dfd7; border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 800; list-style: none; }
+.activity-details > summary::-webkit-details-marker { display: none; }
+.activity-details[open] > summary { margin-bottom: 0; border-radius: 8px 8px 0 0; }
+.activity-list .is-noteworthy { background: #fff8ee; }
+
+
+/* VOLCURVE_UI_SIMPLIFY_V1_3
+   Ordinary equity IV is fixed to bsVol + matrix. Generic query rules are not shown
+   in the left rail; they belong in Methodology & Rules. */
+
+
+/* VOLCURVE_CORTEX_PLAYGROUND_V1_6 */
+.playground-jump { padding: 5px 8px; color: #dfe8e2; border: 1px solid rgba(255,255,255,.16); border-radius: 7px; font-size: 10px; font-weight: 800; text-decoration: none; }
+.playground-jump:hover { color: #fff; border-color: rgba(255,255,255,.34); }
+.cortex-playground { margin-top: 28px; overflow: hidden; }
+.cortex-playground > summary { list-style: none; }
+.cortex-playground > summary::-webkit-details-marker { display: none; }
+.cortex-playground-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; cursor: pointer; }
+.cortex-playground-summary h3 { margin: 2px 0 0; font-size: 15px; }
+.cortex-playground-body { display: grid; gap: 13px; padding: 0 20px 20px; border-top: 1px solid var(--line); }
+.cortex-playground-endpoint { display: flex; align-items: center; gap: 10px; padding-top: 15px; font-size: 10px; font-weight: 750; }
+.cortex-playground-endpoint code { padding: 5px 7px; background: #f2f4ef; border: 1px solid var(--line); border-radius: 6px; font-size: 10px; }
+.cortex-playground-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.cortex-playground-editor { display: grid; gap: 6px; }
+.cortex-playground-editor > span, .cortex-playground-response-heading span { color: #465149; font-size: 10px; font-weight: 800; }
+.cortex-playground-editor textarea { width: 100%; min-height: 300px; resize: vertical; padding: 12px; color: var(--ink); background: #fbfcf9; border: 1px solid #cbd3c8; border-radius: 9px; outline: none; font: 11px/1.5 Consolas, "SFMono-Regular", Menlo, monospace; tab-size: 2; }
+.cortex-playground-editor textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(15,117,84,.1); }
+.cortex-playground-actions { display: grid; grid-template-columns: auto auto minmax(170px, 1fr); gap: 8px; }
+.cortex-playground-actions .secondary-button { min-height: 38px; }
+.cortex-playground-actions .playground-send { margin: 0; min-height: 38px; box-shadow: none; }
+.cortex-playground-response-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; padding-top: 4px; }
+.cortex-playground-response-heading small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+.cortex-playground-response-heading small.is-error { color: var(--red); }
+.cortex-playground-response { min-height: 160px; max-height: 520px; overflow: auto; margin: 0; padding: 12px; color: #26332c; background: #f5f7f2; border: 1px solid var(--line); border-radius: 9px; font: 10px/1.5 Consolas, "SFMono-Regular", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .cortex-playground-actions { grid-template-columns: 1fr; } }
+
+/* VOLCURVE_FULL_WIDTH_LAYOUT_V1_6_1
+   Keep the wide Cortex Playground layout and let the main workspaces use
+   the same available width instead of sitting in a narrower centered box. */
+.workspace {
+  min-width: 0;
+}
+
+.result-workspace,
+.compare-workspace {
+  width: 100%;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.welcome-grid {
+  width: 100%;
+  max-width: none;
+}
+
+.cortex-playground {
+  width: 100%;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
 }
