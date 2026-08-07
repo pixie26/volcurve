@@ -163,3 +163,68 @@ def test_compare_supports_five_synchronized_charts_and_per_indicator_instruments
     assert "Plotly.Fx.unhover" in javascript
     assert "syncXZoom" in javascript
     assert 'update["xaxis.range[0]"]' in javascript
+
+
+def test_hovering_one_chart_reads_out_every_chart_for_that_date():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'id="crosshairReadout"' in html
+    assert "renderCrosshairReadout" in javascript
+    # The readout walks every lane, not just the hovered one.
+    readout = javascript.split("function renderCrosshairReadout", 1)[1].split("function renderIndicatorDetails", 1)[0]
+    assert "lane <= indicatorState.chartCount" in readout
+    assert "坐标 ${lane}" in readout
+    assert "HOVER DATE" in readout
+
+
+def test_query_rail_asks_for_dates_then_underlying_then_indicator_once():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert html.index("1 · 日期范围") < html.index("2 · Underlying 与坐标") < html.index("3 · Indicator builder")
+    # A single underlying input drives both the surface query and every new indicator.
+    assert html.count('list="instrumentOptions"') == 1
+    assert 'data-draft="instrumentCode"' in html
+    assert 'id="draftChartLane"' in html
+    assert 'data-draft="chartLane"' in html
+    assert "indicatorPlacementFields" not in javascript
+    assert "renderScopeFields" in javascript
+
+
+def test_saved_indicators_can_be_combined_with_arithmetic_operators():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'value="derived"' in html
+    assert "OPERATOR_SYMBOLS = { add:" in javascript
+    assert "computeDerivedSeries" in javascript
+    assert 'data-draft="operandA"' in javascript
+    assert 'data-draft="operandB"' in javascript
+    # Derived series stay explicit about gaps and never divide by zero.
+    operator = javascript.split("function applyOperator", 1)[1].split("function numericValue", 1)[0]
+    assert "if (left === null || right === null) return null;" in operator
+    assert "if (right === 0) return null;" in operator
+    assert "指标运算的引用形成了循环" in javascript
+    assert "两个操作数在当前日期范围内没有共同观察日" in javascript
+    assert "请先删除这些运算指标" in javascript
+
+
+def test_statistics_table_summarizes_every_displayed_indicator():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'id="indicatorStatsBody"' in html
+    assert 'id="indicatorStatsHead"' in html
+    assert "renderIndicatorStats" in javascript
+    statistics = javascript.split("function renderIndicatorStats", 1)[1].split("function summarizeSeries", 1)[0]
+    for column in ("观测数", "最新值", "最小", "最大", "平均", "中位数", "标准差", "最新值百分位"):
+        assert column in statistics
+    summarize = javascript.split("function summarizeSeries", 1)[1]
+    # Statistics skip missing points instead of filling them in.
+    assert "point.value !== null && point.value !== undefined" in summarize
+    assert "sorted.filter((value) => value <= latest.value).length / count" in summarize
