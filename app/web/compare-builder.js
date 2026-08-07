@@ -917,7 +917,9 @@
         dragmode: "zoom",
         legend: { orientation: "h", y: 1.1, x: 0 },
         font: { family: "Inter, Microsoft YaHei, sans-serif", size: 10, color: "#536159" },
-        xaxis: { title: "Observation date", type: "date", range: start && end ? [start, end] : undefined, gridcolor: "#e8ebe4", showspikes: true, spikemode: "across", spikesnap: "cursor", spikecolor: "#6f7f76", spikethickness: 1 },
+        // Snapping to data (not the cursor) keeps the guide line on the same observation
+        // date in every lane, so the synchronized lines all sit on one vertical.
+        xaxis: { title: "Observation date", type: "date", range: start && end ? [start, end] : undefined, gridcolor: "#e8ebe4", showspikes: true, spikemode: "across", spikesnap: "data", spikedash: "dot", spikecolor: "#6f7f76", spikethickness: 1 },
         yaxis: { title: "Volatility (%)", gridcolor: "#e8ebe4", zeroline: false },
         yaxis2: { title: "Price / ratio", overlaying: "y", side: "right", showgrid: false, zeroline: false },
         annotations,
@@ -951,12 +953,19 @@
   function bindChartSync(div) {
     if (!div?.on || div.dataset.syncBound === "true") return;
     div.dataset.syncBound = "true";
+    // Charts we drive programmatically echo these events straight back; ignoring the
+    // echo here keeps the flag scoped to one synchronous fan-out instead of a timer,
+    // which previously let a source unhover cancel the hover that followed it.
     div.on("plotly_hover", (event) => {
+      if (indicatorState.hoverSyncing) return;
       const xValue = event.points?.[0]?.x;
       syncHover(div, xValue);
       renderCrosshairReadout(hoverDateKey(xValue));
     });
-    div.on("plotly_unhover", () => clearSynchronizedHover(div));
+    div.on("plotly_unhover", () => {
+      if (indicatorState.hoverSyncing) return;
+      clearSynchronizedHover(div);
+    });
     div.on("plotly_relayout", (event) => syncXZoom(div, event));
   }
 
@@ -1002,26 +1011,43 @@
     return Array.from(document.querySelectorAll("#indicatorCharts .timeseries-chart"));
   }
 
+  // Plotly only draws the vertical spike line for the {xval} form of Fx.hover, and only
+  // when xval is the numeric axis coordinate — {curveNumber, pointNumber} references
+  // produce the tooltip alone, which is why the guide line used to stay on one chart.
   function syncHover(source, xValue) {
-    if (indicatorState.hoverSyncing || xValue === undefined || xValue === null) return;
+    const xval = axisTimestamp(xValue);
+    if (xval === null) return;
     indicatorState.hoverSyncing = true;
-    for (const div of chartDivs()) {
-      if (div === source || !Array.isArray(div.data)) continue;
-      const points = [];
-      div.data.forEach((trace, curveNumber) => {
-        const pointNumber = Array.isArray(trace.x) ? trace.x.findIndex((value) => String(value) === String(xValue)) : -1;
-        if (pointNumber >= 0) points.push({ curveNumber, pointNumber });
-      });
-      if (points.length) Plotly.Fx.hover(div, points);
+    try {
+      for (const div of chartDivs()) {
+        if (div === source || !Array.isArray(div.data) || !div.data.length) continue;
+        Plotly.Fx.hover(div, { xval }, laneSubplot(div));
+      }
+    } finally {
+      indicatorState.hoverSyncing = false;
     }
-    setTimeout(() => { indicatorState.hoverSyncing = false; }, 0);
+  }
+
+  // A lane holding only right-axis series (prices, ratios) lives on subplot xy2, and
+  // asking for xy there finds no points and draws no guide line.
+  function laneSubplot(div) {
+    return div.data.some((trace) => (trace.yaxis || "y") === "y") ? "xy" : "xy2";
+  }
+
+  function axisTimestamp(xValue) {
+    if (xValue === undefined || xValue === null) return null;
+    if (typeof xValue === "number") return xValue;
+    const parsed = Date.parse(xValue instanceof Date ? xValue.toISOString() : String(xValue));
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   function clearSynchronizedHover(source) {
-    if (indicatorState.hoverSyncing) return;
     indicatorState.hoverSyncing = true;
-    for (const div of chartDivs()) if (div !== source) Plotly.Fx.unhover(div);
-    setTimeout(() => { indicatorState.hoverSyncing = false; }, 0);
+    try {
+      for (const div of chartDivs()) if (div !== source) Plotly.Fx.unhover(div);
+    } finally {
+      indicatorState.hoverSyncing = false;
+    }
   }
 
   function syncXZoom(source, event) {
