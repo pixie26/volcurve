@@ -188,13 +188,17 @@ button { color: inherit; }
 .stats-scroll { max-height: 560px; }
 /* The table width is set inline to the sum of the column widths. Without an explicit
    width a fixed-layout table still lets long header text widen a column past its <col>,
-   so a dragged width would not survive the next render. */
-.stats-table { table-layout: fixed; }
+   so a dragged width would not survive the next render.
+   border-collapse must be `separate`: browsers ignore position:sticky on cells of a
+   collapsed-border table, which silently unpins the statistic-name column. */
+.stats-table { table-layout: fixed; border-collapse: separate; border-spacing: 0; }
 .stats-table th, .stats-table td { overflow: hidden; text-overflow: ellipsis; }
 .stats-table th { position: relative; }
 .stats-table thead th { position: sticky; top: 0; z-index: 2; vertical-align: top; }
 /* First column pins so the statistic names stay readable while scrolling sideways. */
-.stats-label-cell { position: sticky; left: 0; z-index: 3; text-align: left; color: #526058; background: #eef1ea; border-right: 1px solid var(--line); font-weight: 700; }
+/* Needs to outrank `.stats-table th { position: relative }` above, which the resize
+   handles rely on — otherwise the statistic names scroll away with the data. */
+.stats-table .stats-label-cell { position: sticky; left: 0; z-index: 3; text-align: left; color: #526058; background: #eef1ea; border-right: 1px solid var(--line); font-weight: 700; }
 .stats-table tbody .stats-label-cell { padding: 9px 12px; font-size: 11px; }
 .stats-table thead .stats-label-cell { z-index: 4; }
 .stats-series-head { text-align: right; }
@@ -208,12 +212,18 @@ body.is-resizing-column { cursor: col-resize; user-select: none; }
 .stat-number { font-variant-numeric: tabular-nums; }
 .stat-up { color: var(--green); }
 .stat-down { color: var(--red); }
-.pct-cell { font-variant-numeric: tabular-nums; font-weight: 700; }
-.pct-low { color: #1c5f78; background: #dff0f6; }
-.pct-mid-low { color: #2b6b56; background: #e6f3ec; }
-.pct-mid { color: var(--muted); }
-.pct-mid-high { color: #8a5412; background: #fdf0dd; }
-.pct-high { color: #8f2f26; background: #fde3de; }
+/* Shared five-step scale: percentile reads it as 0-100, z-score as sigma. */
+.heat-cell { font-variant-numeric: tabular-nums; font-weight: 700; }
+.heat-low { color: #1c5f78; background: #dff0f6; }
+.heat-mid-low { color: #2b6b56; background: #e6f3ec; }
+.heat-mid { color: var(--muted); }
+.heat-mid-high { color: #8a5412; background: #fdf0dd; }
+.heat-high { color: #8f2f26; background: #fde3de; }
+.stats-table [data-drag-handle] { cursor: grab; }
+.stats-table [data-drag-handle]:active { cursor: grabbing; }
+.stats-row-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-table .is-dragging { opacity: .45; }
+.stats-table .is-drop-target { box-shadow: inset 0 0 0 2px var(--green); }
 .stats-heading-actions { display: flex; align-items: center; gap: 10px; }
 .stats-columns { position: relative; }
 .stats-columns summary { padding: 6px 9px; color: var(--green-dark); background: var(--panel); border: 1px solid #aac6b6; border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 750; list-style: none; }

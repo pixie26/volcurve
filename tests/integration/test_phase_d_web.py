@@ -398,11 +398,44 @@ def test_statistics_table_is_transposed_with_resizable_columns():
     assert "series.map(({ item, stats }) => statCell(column, item, stats))" in render
     assert "applyStatsTableWidth()" in render
 
-    resize = javascript.split("function startColumnResize", 1)[1].split("function columnWidth", 1)[0]
+    resize = javascript.split("function startColumnResize", 1)[1].split("// Columns (indicators)", 1)[0]
     assert "MIN_COLUMN_WIDTH" in resize
     # The <col> has no usable box of its own, so the header cell is measured instead.
     assert "headerCell.getBoundingClientRect().width" in resize
     assert "persistWorkspace()" in resize
+
+
+def test_statistics_label_column_stays_pinned_while_scrolling_sideways():
+    with TestClient(app) as client:
+        stylesheet = client.get("/static/styles.css").text
+
+    # Browsers ignore position:sticky on cells of a collapsed-border table, and the
+    # pinning rule has to outrank the relative positioning the resize handles need.
+    assert "border-collapse: separate" in stylesheet
+    assert ".stats-table .stats-label-cell { position: sticky; left: 0;" in stylesheet
+    assert ".stats-table th { position: relative; }" in stylesheet
+    assert stylesheet.index(".stats-table th { position: relative; }") < stylesheet.index(
+        ".stats-table .stats-label-cell { position: sticky"
+    )
+
+
+def test_statistics_rows_and_columns_can_be_dragged_into_a_new_order():
+    with TestClient(app) as client:
+        javascript = client.get("/static/compare-builder.js").text
+
+    assert 'data-drag-column="${item.id}"' in javascript
+    assert 'data-drag-row="${escapeHtml(column.id)}"' in javascript
+    assert "function bindStatsDragControls" in javascript
+
+    drag = javascript.split("function bindStatsDragControls", 1)[1].split("function statsDropTarget", 1)[0]
+    # A width drag must never be mistaken for a reorder.
+    assert 'document.body.classList.contains("is-resizing-column")' in drag
+
+    reorder = javascript.split("function applyStatsReorder", 1)[1].split("function moveWithin", 1)[0]
+    # Reordering a column reorders the indicators themselves so charts stay in step.
+    assert "moveWithin(indicatorState.items, from, to)" in reorder
+    assert "moveWithin(columns, from, to)" in reorder
+    assert "persistStatsColumns()" in reorder
 
 
 def test_statistics_columns_are_configurable_and_cover_the_full_metric_set():
@@ -415,20 +448,23 @@ def test_statistics_columns_are_configurable_and_cover_the_full_metric_set():
     assert 'STATS_STORAGE_KEY = "volcurve.compare.statscolumns.v1"' in javascript
 
     columns = javascript.split("const STAT_COLUMNS = [", 1)[1].split("];", 1)[0]
-    for metric in ("zScore", "change5", "change20", "iqr", "maxDate", "minDate",
-                   "largestGain", "largestDrop", "skewness", "kurtosis", "mean20",
-                   "autocorrelation", "percentile", "range"):
+    for metric in ("zScore", "change5", "change20", "change60", "iqr", "maxDate", "minDate",
+                   "largestGain", "largestDrop", "skewness", "kurtosis", "mean20", "mean60",
+                   "autocorrelation", "autocorrelation5", "autocorrelation20", "percentile",
+                   "range", "p25", "p75", "vsMean20", "meanAbsChange", "positiveShare",
+                   "sessionsSinceMax", "sessionsSinceMin"):
         assert f'id: "{metric}"' in columns
 
     restore = javascript.split("function restoreStatsColumns", 1)[1].split("function persistStatsColumns", 1)[0]
     # Columns added in a later release must not disappear for users with a saved layout.
     assert "if (!seen.has(column.id)) ordered.push({ id: column.id, visible: true })" in restore
 
-    # Volatility renders at one decimal; percentiles are bucketed for colour.
+    # Volatility renders at one decimal; percentile and z-score share a colour scale.
     digits = javascript.split("function valueDigits", 1)[1].split("function percentileBucket", 1)[0]
     assert 'if (unit === "vol") return 1;' in digits
     assert "function percentileBucket" in javascript
-    assert "pct-high" in javascript and "pct-low" in javascript
+    assert "function zScoreBucket" in javascript
+    assert "heat-high" in javascript and "heat-low" in javascript
 
 
 def test_statistics_table_summarizes_every_displayed_indicator():

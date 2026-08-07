@@ -25,6 +25,7 @@
     pendingBoardLoad: null,
     statsColumns: [],
     columnWidths: {},
+    dragSource: null,
     dateMode: "sliding",
     slidingWindow: "1Y",
   };
@@ -71,23 +72,34 @@
     { id: "change1", label: "1D 变化", kind: "signed" },
     { id: "change5", label: "5D 变化", kind: "signed" },
     { id: "change20", label: "20D 变化", kind: "signed" },
+    { id: "change60", label: "60D 变化", kind: "signed" },
     { id: "min", label: "最小", kind: "value" },
     { id: "max", label: "最大", kind: "value" },
     { id: "range", label: "区间 (最大−最小)", kind: "value" },
     { id: "mean", label: "平均", kind: "value" },
     { id: "mean20", label: "20D 均值", kind: "value" },
+    { id: "mean60", label: "60D 均值", kind: "value" },
+    { id: "vsMean20", label: "最新值 − 20D 均值", kind: "signed" },
     { id: "median", label: "中位数", kind: "value" },
+    { id: "p25", label: "25% 分位", kind: "value" },
+    { id: "p75", label: "75% 分位", kind: "value" },
     { id: "stdDev", label: "标准差", kind: "value" },
     { id: "iqr", label: "IQR", kind: "value" },
     { id: "percentile", label: "最新值百分位", kind: "percentile" },
-    { id: "zScore", label: "Z-score", kind: "ratio" },
+    { id: "zScore", label: "Z-score", kind: "zscore" },
     { id: "maxDate", label: "最大值日期", kind: "text" },
+    { id: "sessionsSinceMax", label: "距最大值 (观测数)", kind: "count" },
     { id: "minDate", label: "最小值日期", kind: "text" },
+    { id: "sessionsSinceMin", label: "距最小值 (观测数)", kind: "count" },
     { id: "largestGain", label: "最大单日上升", kind: "signed" },
     { id: "largestDrop", label: "最大单日下降", kind: "signed" },
+    { id: "meanAbsChange", label: "平均单日绝对变化", kind: "value" },
+    { id: "positiveShare", label: "正值占比", kind: "percent" },
     { id: "skewness", label: "偏度", kind: "ratio" },
     { id: "kurtosis", label: "峰度", kind: "ratio" },
     { id: "autocorrelation", label: "自相关(1)", kind: "ratio" },
+    { id: "autocorrelation5", label: "自相关(5)", kind: "ratio" },
+    { id: "autocorrelation20", label: "自相关(20)", kind: "ratio" },
   ];
 
   function defaultDraft(type) {
@@ -1857,6 +1869,86 @@
       renderIndicatorStats();
     });
     $("indicatorStatsHead").addEventListener("pointerdown", startColumnResize);
+    bindStatsDragControls();
+  }
+
+  // Columns (indicators) and rows (statistics) can both be dragged into a new order.
+  // Reordering a column reorders the indicators themselves, so the chart legends and the
+  // saved list follow suit rather than drifting out of step with the table.
+  function bindStatsDragControls() {
+    const table = $("indicatorStatsTable");
+    table.addEventListener("dragstart", (event) => {
+      // Only the inner handle is draggable, so grabbing the resize divider — a sibling —
+      // can never start a reorder. The body class is a second line of defence.
+      const cell = event.target.closest("[data-drag-handle]")?.closest("[data-drag-column], [data-drag-row]");
+      if (!cell || document.body.classList.contains("is-resizing-column")) return;
+      indicatorState.dragSource = cell.dataset.dragColumn
+        ? { kind: "column", key: cell.dataset.dragColumn }
+        : { kind: "row", key: cell.dataset.dragRow };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", indicatorState.dragSource.key);
+      cell.classList.add("is-dragging");
+    });
+    table.addEventListener("dragover", (event) => {
+      const target = statsDropTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      for (const marked of table.querySelectorAll(".is-drop-target")) marked.classList.remove("is-drop-target");
+      target.cell.classList.add("is-drop-target");
+    });
+    table.addEventListener("drop", (event) => {
+      const target = statsDropTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      applyStatsReorder(target.key);
+    });
+    table.addEventListener("dragend", clearStatsDragState);
+  }
+
+  function statsDropTarget(event) {
+    const source = indicatorState.dragSource;
+    if (!source) return null;
+    const cell = event.target.closest(source.kind === "column" ? "[data-drag-column]" : "[data-drag-row]");
+    if (!cell) return null;
+    const key = source.kind === "column" ? cell.dataset.dragColumn : cell.dataset.dragRow;
+    return key === source.key ? null : { cell, key };
+  }
+
+  function applyStatsReorder(targetKey) {
+    const source = indicatorState.dragSource;
+    clearStatsDragState();
+    if (!source) return;
+    if (source.kind === "column") {
+      const from = indicatorState.items.findIndex((item) => String(item.id) === source.key);
+      const to = indicatorState.items.findIndex((item) => String(item.id) === targetKey);
+      if (from < 0 || to < 0) return;
+      moveWithin(indicatorState.items, from, to);
+      persistWorkspace();
+      refreshWorkspacePanels({ details: false });
+      return;
+    }
+    const columns = indicatorState.statsColumns;
+    const from = columns.findIndex((column) => column.id === source.key);
+    const to = columns.findIndex((column) => column.id === targetKey);
+    if (from < 0 || to < 0) return;
+    moveWithin(columns, from, to);
+    persistStatsColumns();
+    renderStatsColumnConfig();
+    renderIndicatorStats();
+  }
+
+  function moveWithin(list, fromIndex, toIndex) {
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, moved);
+  }
+
+  function clearStatsDragState() {
+    indicatorState.dragSource = null;
+    const table = $("indicatorStatsTable");
+    for (const marked of table.querySelectorAll(".is-dragging, .is-drop-target")) {
+      marked.classList.remove("is-dragging", "is-drop-target");
+    }
   }
 
   // Dragging a header divider resizes that column. Widths live in the workspace and are
@@ -1874,6 +1966,10 @@
     const startWidth = headerCell.getBoundingClientRect().width;
     handle.setPointerCapture(event.pointerId);
     document.body.classList.add("is-resizing-column");
+    // The header is draggable for reordering; turn that off for the duration of the
+    // drag or Chrome starts a reorder instead of a resize.
+    const wasDraggable = headerCell.draggable;
+    headerCell.draggable = false;
 
     const move = (moveEvent) => {
       const width = Math.max(MIN_COLUMN_WIDTH, Math.round(startWidth + moveEvent.clientX - startX));
@@ -1886,6 +1982,7 @@
       handle.removeEventListener("pointerup", finish);
       handle.removeEventListener("pointercancel", finish);
       document.body.classList.remove("is-resizing-column");
+      headerCell.draggable = wasDraggable;
       persistWorkspace();
     };
     handle.addEventListener("pointermove", move);
@@ -1952,8 +2049,8 @@
 
     $("indicatorStatsHead").innerHTML = `<tr>
       <th class="stats-label-cell">统计项${resizeHandle(STATS_LABEL_COLUMN)}</th>
-      ${series.map(({ item, stats, error }) => `<th class="stats-series-head">
-        <span class="stats-series-name" title="${escapeHtml(indicatorLabel(item))}">${escapeHtml(indicatorLabel(item))}</span>
+      ${series.map(({ item, stats, error }) => `<th class="stats-series-head" data-drag-column="${item.id}">
+        <span class="stats-series-name" draggable="true" data-drag-handle title="拖动可调整列顺序">${escapeHtml(indicatorLabel(item))}</span>
         ${stats ? "" : `<small class="stats-series-note">${escapeHtml(error || "当前范围内没有有效值")}</small>`}
         ${resizeHandle(String(item.id))}
       </th>`).join("")}
@@ -1965,7 +2062,7 @@
       return;
     }
     body.innerHTML = rows.map((column) => `<tr>
-      <th scope="row" class="stats-label-cell">${escapeHtml(column.label)}</th>
+      <th scope="row" class="stats-label-cell" data-drag-row="${escapeHtml(column.id)}"><span class="stats-row-name" draggable="true" data-drag-handle title="拖动可调整统计项顺序">${escapeHtml(column.label)}</span></th>
       ${series.map(({ item, stats }) => statCell(column, item, stats)).join("")}
     </tr>`).join("");
     $("indicatorStatsCount").textContent = `${series.length} series`;
@@ -1981,11 +2078,14 @@
     const value = stats[column.id];
     if (column.kind === "text") return `<td>${escapeHtml(value ?? "—")}</td>`;
     if (column.kind === "count") return `<td class="stat-number">${escapeHtml(formatNumber(value, 0))}</td>`;
-    if (column.kind === "percentile") {
+    if (column.kind === "percentile" || column.kind === "zscore") {
       if (value === null || value === undefined) return '<td class="cell-missing">—</td>';
-      return `<td class="pct-cell ${percentileBucket(value)}">${escapeHtml(formatFixed(value, 1))}%</td>`;
+      const bucket = column.kind === "percentile" ? percentileBucket(value) : zScoreBucket(value);
+      const text = column.kind === "percentile" ? `${formatFixed(value, 1)}%` : formatFixed(value, 2);
+      return `<td class="heat-cell ${bucket}">${escapeHtml(text)}</td>`;
     }
     if (value === null || value === undefined) return '<td class="cell-missing">—</td>';
+    if (column.kind === "percent") return `<td class="stat-number">${escapeHtml(`${formatFixed(value, 1)}%`)}</td>`;
     // Ratios (z-score, skew, kurtosis, autocorrelation) are unitless by construction.
     if (column.kind === "ratio") return `<td class="stat-number">${escapeHtml(formatFixed(value, 2))}</td>`;
     const text = `${formatFixed(value, valueDigits(item))}${unitSuffix(item)}`;
@@ -2008,11 +2108,20 @@
   }
 
   function percentileBucket(value) {
-    if (value >= 80) return "pct-high";
-    if (value >= 60) return "pct-mid-high";
-    if (value > 40) return "pct-mid";
-    if (value > 20) return "pct-mid-low";
-    return "pct-low";
+    if (value >= 80) return "heat-high";
+    if (value >= 60) return "heat-mid-high";
+    if (value > 40) return "heat-mid";
+    if (value > 20) return "heat-mid-low";
+    return "heat-low";
+  }
+
+  // Same five-step scale as the percentile, read in standard deviations.
+  function zScoreBucket(value) {
+    if (value >= 2) return "heat-high";
+    if (value >= 1) return "heat-mid-high";
+    if (value > -1) return "heat-mid";
+    if (value > -2) return "heat-mid-low";
+    return "heat-low";
   }
 
   function summarizeSeries(points) {
@@ -2032,7 +2141,10 @@
     const latest = usable.at(-1);
     const min = sorted[0];
     const max = sorted.at(-1);
+    const maxIndex = values.indexOf(max);
+    const minIndex = values.indexOf(min);
     const steps = values.slice(1).map((value, index) => value - values[index]);
+    const mean20 = average(values.slice(-20));
     return {
       count,
       latest: latest.value,
@@ -2040,11 +2152,18 @@
       min,
       max,
       range: max - min,
-      minDate: usable.find((point) => point.value === min).date,
-      maxDate: usable.find((point) => point.value === max).date,
+      minDate: usable[minIndex].date,
+      maxDate: usable[maxIndex].date,
+      // How many observations ago the extreme happened; 0 means it is the latest point.
+      sessionsSinceMax: count - 1 - maxIndex,
+      sessionsSinceMin: count - 1 - minIndex,
       mean,
-      mean20: average(values.slice(-20)),
+      mean20,
+      mean60: average(values.slice(-60)),
+      vsMean20: mean20 === null ? null : latest.value - mean20,
       median: quantile(sorted, 0.5),
+      p25: quantile(sorted, 0.25),
+      p75: quantile(sorted, 0.75),
       stdDev,
       iqr: quantile(sorted, 0.75) - quantile(sorted, 0.25),
       percentile: (sorted.filter((value) => value <= latest.value).length / count) * 100,
@@ -2052,11 +2171,16 @@
       change1: changeOverSessions(values, 1),
       change5: changeOverSessions(values, 5),
       change20: changeOverSessions(values, 20),
+      change60: changeOverSessions(values, 60),
       largestGain: steps.length ? steps.reduce((best, step) => Math.max(best, step), -Infinity) : null,
       largestDrop: steps.length ? steps.reduce((best, step) => Math.min(best, step), Infinity) : null,
+      meanAbsChange: steps.length ? average(steps.map(Math.abs)) : null,
+      positiveShare: (values.filter((value) => value > 0).length / count) * 100,
       skewness: sampleSkewness(values, mean, stdDev),
       kurtosis: sampleKurtosis(values, mean, stdDev),
-      autocorrelation: lagOneAutocorrelation(values, mean),
+      autocorrelation: autocorrelationAtLag(values, mean, 1),
+      autocorrelation5: autocorrelationAtLag(values, mean, 5),
+      autocorrelation20: autocorrelationAtLag(values, mean, 20),
     };
   }
 
@@ -2094,14 +2218,14 @@
       - (3 * (count - 1) ** 2) / ((count - 2) * (count - 3));
   }
 
-  function lagOneAutocorrelation(values, mean) {
-    if (values.length < 3) return null;
+  function autocorrelationAtLag(values, mean, lag) {
+    if (values.length < lag + 2) return null;
     let numerator = 0;
     let denominator = 0;
     for (let index = 0; index < values.length; index += 1) {
       const centered = values[index] - mean;
       denominator += centered * centered;
-      if (index > 0) numerator += centered * (values[index - 1] - mean);
+      if (index >= lag) numerator += centered * (values[index - lag] - mean);
     }
     return denominator > 0 ? numerator / denominator : null;
   }
