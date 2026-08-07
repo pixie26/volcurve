@@ -98,6 +98,28 @@ async function apiFetch(url, options = {}) {
   return response;
 }
 
+function apiErrorSummary(error, fallback = "请求失败") {
+  const payload = error?.payload || {};
+  const parts = [];
+  if (payload.code) parts.push(payload.code);
+  parts.push(payload.message || error?.message || fallback);
+  if (payload.suggestedAction) parts.push(`建议：${payload.suggestedAction}`);
+  if (payload.requestId) parts.push(`Request ${payload.requestId}`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+function apiErrorMeta(error, fallback = "请求失败") {
+  const payload = error?.payload || {};
+  return {
+    message: payload.message || error?.message || fallback,
+    errorCode: payload.code || null,
+    suggestedAction: payload.suggestedAction || null,
+    suggestedActionSource: payload.suggestedActionSource || null,
+    requestId: payload.requestId || error?.requestId || null,
+    stage: payload.stage || null,
+  };
+}
+
 async function initialize() {
   const today = new Date();
   $("endDate").value = isoDate(today);
@@ -259,7 +281,13 @@ function contractDiscoveryPanel() {
   if (discovery?.status === "loading") {
     result = '<p class="coordinate-discovery-status">正在向数据源请求该观察日的 listed surface…</p>';
   } else if (discovery?.status === "error") {
-    result = `<p class="coordinate-discovery-error">${escapeHtml(discovery.message)}</p>`;
+    const parts = [
+      discovery.errorCode,
+      discovery.message,
+      discovery.suggestedAction ? `建议：${discovery.suggestedAction}` : null,
+      discovery.requestId ? `Request ${discovery.requestId}` : null,
+    ].filter(Boolean);
+    result = `<p class="coordinate-discovery-error">${parts.map(escapeHtml).join(" · ")}</p>`;
   } else if (discovery?.status === "ready") {
     const expiryOptions = discovery.snapshot.maturities
       .map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
@@ -329,7 +357,7 @@ async function loadListedCoordinates() {
       status: "error",
       code,
       date,
-      message: error.payload?.message || error.message || "可用坐标加载失败。",
+      ...apiErrorMeta(error, "可用坐标加载失败。"),
     };
   }
   renderCoordinateFields();
@@ -861,7 +889,7 @@ async function searchInstruments() {
       : `匹配 ${data.matchedCount} 项；点击下方结果即可选用。`;
   } catch (error) {
     hideInstrumentResults();
-    $("instrumentHelp").textContent = `搜索失败：${error.payload?.message || error.message}`;
+    $("instrumentHelp").textContent = `搜索失败：${apiErrorSummary(error, "instrument catalogue 搜索失败")}`;
   }
 }
 

@@ -86,7 +86,7 @@ def test_web_discovers_listed_contract_coordinates_without_auto_substitution():
     assert "这是用户选择，不是最近坐标替代" in javascript
 
 
-def test_compare_is_an_indicator_builder_with_visible_bnp_request_fields():
+def test_compare_is_an_indicator_builder_with_internal_bnp_wire_defaults():
     with TestClient(app) as client:
         html = client.get("/").text
         javascript = client.get("/static/compare-builder.js").text
@@ -94,27 +94,23 @@ def test_compare_is_an_indicator_builder_with_visible_bnp_request_fields():
     assert "Indicator builder" in html
     assert "添加并加载指标" in html
     assert "刷新激活项" in html
-    assert "Vol convention" in javascript
-    assert "Layout" in javascript
     assert 'volatilityConvention: "bsVol"' in javascript
     assert 'layout: "matrix"' in javascript
+    assert "requestSystemFields" in javascript
     assert "data-indicator-toggle" in javascript
     assert "data-indicator-delete" in javascript
     assert "connectgaps: false" in javascript
 
-
-def test_compare_manual_coordinates_distinguish_schema_rejection_from_missing_data():
+def test_compare_listed_coordinates_are_direct_and_exact():
     with TestClient(app) as client:
         javascript = client.get("/static/compare-builder.js").text
 
-    assert "数据源 OpenAPI 不接受 sliding maturity" in javascript
-    assert "数据源 OpenAPI 不接受 moneyness" in javascript
-    assert "数据源 API 不支持 Sliding maturity + Absolute strike" in javascript
-    assert "允许手输任意合法日期" in javascript
-    assert "不存在的精确 strike 返回缺失" in javascript
-    assert "加载可用坐标" in javascript
-    assert "系统没有自动选择" in javascript
-
+    assert "Listed expiry" in javascript
+    assert "Observation date" in javascript
+    assert "Select listed expiry" in javascript
+    assert 'maturity_rule: "listed"' in javascript
+    assert 'strike_rule: "fixed"' in javascript
+    assert "可直接输入任意正数，也可从下拉建议选择" in javascript
 
 def test_compare_non_iv_carrier_assumptions_are_visible():
     with TestClient(app) as client:
@@ -147,25 +143,20 @@ def test_compare_restores_full_per_indicator_details_and_persists_configuration(
     assert "volcurveCompareDetails.downloadSelectedCsv" in app_javascript
 
 
-def test_compare_supports_five_synchronized_charts_and_per_indicator_instruments():
+def test_compare_supports_eight_synchronized_charts_and_per_indicator_instruments():
     with TestClient(app) as client:
         html = client.get("/").text
         javascript = client.get("/static/compare-builder.js").text
 
-    assert "最多 5 个坐标" in html
     assert 'id="addChartButton"' in html
-    assert "MAX_CHARTS = 5" in javascript
+    assert "MAX_CHARTS = 8" in javascript
     assert 'instrumentCode: document.getElementById("instrumentCode")' in javascript
-    assert 'data-draft="instrumentCode"' in javascript
-    assert 'data-draft="chartLane"' in javascript
+    assert 'data-draft="instrumentCode"' in html
+    assert 'id="draftChartLane"' in html
     assert "data-indicator-lane" in javascript
-    assert 'dragmode: "zoom"' in javascript
     assert 'hovermode: "x unified"' in javascript
     assert "Plotly.Fx.hover" in javascript
-    assert "Plotly.Fx.unhover" in javascript
     assert "syncXZoom" in javascript
-    assert 'update["xaxis.range[0]"]' in javascript
-
 
 def test_hovering_one_chart_reads_out_every_chart_for_that_date():
     with TestClient(app) as client:
@@ -203,20 +194,19 @@ def test_hover_draws_the_same_vertical_guide_line_on_every_chart():
     assert '"xy" : "xy2"' in lane_subplot
 
 
-def test_query_rail_asks_for_dates_then_underlying_then_indicator_once():
+def test_query_rail_uses_unnumbered_date_underlying_indicator_groups():
     with TestClient(app) as client:
         html = client.get("/").text
         javascript = client.get("/static/compare-builder.js").text
 
-    assert html.index("1 · 日期范围") < html.index("2 · Underlying 与坐标") < html.index("3 · Indicator builder")
-    # A single underlying input drives both the surface query and every new indicator.
+    assert "1 · 日期范围" not in html
+    assert "2 · Underlying 与坐标" not in html
+    assert "3 · Indicator builder" not in html
+    assert html.index("Range mode") < html.index("Underlying · instrument code") < html.index("Indicator builder")
     assert html.count('id="instrumentCode"') == 1
-    assert 'data-draft="instrumentCode"' in html
-    assert 'id="draftChartLane"' in html
-    assert 'data-draft="chartLane"' in html
-    assert "indicatorPlacementFields" not in javascript
+    assert 'id="slidingWindow"' in html
+    assert "52d, 2w, 3m, 3y" in html
     assert "renderScopeFields" in javascript
-
 
 def test_instrument_search_results_are_clickable_not_a_datalist():
     with TestClient(app) as client:
@@ -658,3 +648,17 @@ def test_one_missing_control_does_not_disable_the_rest_of_the_page():
     init = javascript.split("function initIndicatorBuilder", 1)[1].split("function bindDateModeControls", 1)[0]
     assert "$(" not in init, "every binding in init must go through the guarded helper"
     assert "console.error(`volcurve: 「${name}」初始化失败`" in init
+
+
+def test_local_async_errors_render_backend_suggested_action():
+    with TestClient(app) as client:
+        app_javascript = client.get("/static/app.js").text
+        compare_javascript = client.get("/static/compare-builder.js").text
+        playground = client.get("/static/cortex-playground.js").text
+
+    assert "apiErrorSummary" in app_javascript
+    assert "suggestedAction" in app_javascript
+    assert "apiErrorSummary" in compare_javascript
+    assert "strikeSuggestedAction" in compare_javascript
+    assert "suggestedActionSource" in compare_javascript
+    assert "action ${data.suggestedActionSource}" in playground

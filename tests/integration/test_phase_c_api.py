@@ -246,6 +246,9 @@ def test_compare_rejects_range_before_fetch_and_returns_normalized_error(api_cli
     assert payload["code"] == "INVALID_REQUEST"
     assert payload["stage"] == "validation"
     assert payload["requestId"] == response.headers["x-request-id"]
+    assert payload["suggestedActionSource"] == "local"
+    assert "1W~1Y" not in payload["suggestedAction"]
+    assert "capabilities" in payload["suggestedAction"]
     assert "traceback" not in response.text.casefold()
 
 
@@ -272,3 +275,26 @@ def test_validation_and_upstream_errors_do_not_leak_secrets_or_paths(api_client)
     assert "abc.def" not in failure.text
     assert "D:\\private" not in failure.text
     assert "[REDACTED]" in failure.text
+
+
+def test_upstream_suggested_action_is_preserved_and_marked_upstream(api_client):
+    class UpstreamAdviceClient:
+        def get_instruments_with_result(self, _instrument_type):
+            raise CortexError(
+                ErrorCode.UPSTREAM_UNAVAILABLE,
+                "上游服务异常(503)",
+                status=503,
+                upstream_code="BNP_TEMPORARY",
+                upstream_message="Cortex is temporarily unavailable.",
+                upstream_suggested_action="Retry after the upstream maintenance window.",
+            )
+
+    app.dependency_overrides[get_cortex_client] = lambda: UpstreamAdviceClient()
+    response = api_client.get("/api/v1/instruments", params={"q": "QQQ"})
+    assert response.status_code == 502
+    payload = response.json()
+    assert payload["suggestedAction"] == "Retry after the upstream maintenance window."
+    assert payload["suggestedActionSource"] == "upstream"
+    assert payload["upstreamCode"] == "BNP_TEMPORARY"
+    assert payload["upstreamMessage"] == "Cortex is temporarily unavailable."
+    assert payload["upstreamSuggestedAction"] == payload["suggestedAction"]

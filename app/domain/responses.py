@@ -290,3 +290,7 @@ class ErrorResponse(BaseModel):
     stage: str
     affectedObservations: int = 0
     suggestedAction: str
+    suggestedActionSource: Literal["upstream", "local"] = "local"
+    upstreamCode: str | None = None
+    upstreamMessage: str | None = None
+    upstreamSuggestedAction: str | None = None

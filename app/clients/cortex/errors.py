@@ -31,11 +31,23 @@ class ErrorCode(str, Enum):
 class CortexError(Exception):
     """Upstream call failed; carries a normalized, redacted code + message."""
 
-    def __init__(self, code: ErrorCode, message: str, *, status: int | None = None):
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        status: int | None = None,
+        upstream_code: str | None = None,
+        upstream_message: str | None = None,
+        upstream_suggested_action: str | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
+        self.upstream_code = upstream_code
+        self.upstream_message = upstream_message
+        self.upstream_suggested_action = upstream_suggested_action
 
     def to_dict(self) -> dict:
         return {"error": self.code.value, "message": self.message}

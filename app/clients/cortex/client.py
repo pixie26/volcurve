@@ -772,6 +772,41 @@ class CortexClient:
                 raise CortexError(ErrorCode.SCHEMA_CHANGED, "响应顶层不是数组", status=status)
             return data
 
+        upstream_payload = None
+        try:
+            candidate = response.json()
+            if isinstance(candidate, dict):
+                upstream_payload = candidate
+        except ValueError:
+            upstream_payload = None
+
+        def upstream_text(*keys: str) -> str | None:
+            if upstream_payload is None:
+                return None
+            for key in keys:
+                value = upstream_payload.get(key)
+                if isinstance(value, str):
+                    value = value.strip()
+                    if value:
+                        return redact(value[:1000])
+            return None
+
+        upstream_code = upstream_text("code", "errorCode", "error")
+        upstream_message = upstream_text("message", "errorMessage")
+        upstream_suggested_action = upstream_text(
+            "suggestedAction", "suggested_action", "suggestion"
+        )
+
+        def fail(code: ErrorCode, message: str) -> None:
+            raise CortexError(
+                code,
+                message,
+                status=status,
+                upstream_code=upstream_code,
+                upstream_message=upstream_message,
+                upstream_suggested_action=upstream_suggested_action,
+            )
+
         logger.warning(
             "cortex upstream %s cid=%s body=%s",
             status,
@@ -779,25 +814,28 @@ class CortexClient:
             redact(response.text[:300]),
         )
         if status == 400:
-            raise CortexError(ErrorCode.INVALID_REQUEST, "上游拒绝请求参数(400)", status=status)
+            fail(ErrorCode.INVALID_REQUEST, "上游拒绝请求参数(400)")
         if status == 401:
-            raise CortexError(ErrorCode.AUTHENTICATION_FAILED, "token 失效(401)", status=status)
+            fail(ErrorCode.AUTHENTICATION_FAILED, "token 失效(401)")
         if status == 403:
-            raise CortexError(ErrorCode.ENTITLEMENT_DENIED, "无该数据访问权限(403)", status=status)
+            fail(ErrorCode.ENTITLEMENT_DENIED, "无该数据访问权限(403)")
         if status == 404:
-            raise CortexError(ErrorCode.NO_DATA, "上游无此数据(404)", status=status)
+            fail(ErrorCode.NO_DATA, "上游无此数据(404)")
         if status == 429:
             retry_after = response.headers.get("Retry-After")
-            exc = CortexError(ErrorCode.UPSTREAM_RATE_LIMITED, "上游限流(429)", status=status)
+            exc = CortexError(
+                ErrorCode.UPSTREAM_RATE_LIMITED,
+                "上游限流(429)",
+                status=status,
+                upstream_code=upstream_code,
+                upstream_message=upstream_message,
+                upstream_suggested_action=upstream_suggested_action,
+            )
             exc.retry_after = parse_retry_after(retry_after)
             raise exc
         if status >= 500:
-            raise CortexError(
-                ErrorCode.UPSTREAM_UNAVAILABLE, f"上游服务异常({status})", status=status
-            )
-        raise CortexError(
-            ErrorCode.UPSTREAM_UNAVAILABLE, f"上游返回非预期状态({status})", status=status
-        )
+            fail(ErrorCode.UPSTREAM_UNAVAILABLE, f"上游服务异常({status})")
+        fail(ErrorCode.UPSTREAM_UNAVAILABLE, f"上游返回非预期状态({status})")
 
     # ----------------------------------------------------------------- misc
 
@@ -838,3 +876,5 @@ class CortexClient:
         ):
             return self._load_fixture("schema/sliding_moneyness.json")
         return self._load_fixture("implied_vol_surface.json")
+
+# VOLCURVE_ERROR_PROVENANCE_V1_9

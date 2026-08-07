@@ -8,7 +8,7 @@ ACTIONS: dict[ErrorCode, str] = {
     ErrorCode.AUTHENTICATION_FAILED: "检查 .env 中的 BNP_CLIENT_ID / BNP_CLIENT_SECRET 是否正确且未过期。",
     ErrorCode.ENTITLEMENT_DENIED: "凭证无此数据权限,联系数据源支持(ecomeqd.production@bnpparibas.com)开通后重试。",
     ErrorCode.INSTRUMENT_NOT_FOUND: "用 GET /api/v1/instruments?q= 搜索正确的 instrument code 后重试。",
-    ErrorCode.INVALID_REQUEST: "检查请求参数:日期区间、期限(1W~1Y)、strike 规则与取值范围。",
+    ErrorCode.INVALID_REQUEST: "检查请求参数：日期区间、maturity rule / tenor、strike rule 与坐标取值；具体可用值以 capabilities 与 Cortex OpenAPI 为准。",
     ErrorCode.UPSTREAM_RATE_LIMITED: "上游限流,稍候片刻重试;避免短时间内重复大区间请求。",
     ErrorCode.UPSTREAM_UNAVAILABLE: "上游服务暂时不可用,稍后重试;持续失败请联系数据源技术支持。",
     ErrorCode.NO_DATA: "该参数组合无数据,尝试缩短日期区间或更换标的/期限。",

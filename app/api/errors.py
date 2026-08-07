@@ -59,16 +59,41 @@ def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", "unavailable")
 
 
-def _response(request: Request, code: ErrorCode, message: str) -> JSONResponse:
+def _response(
+    request: Request,
+    code: ErrorCode,
+    message: str,
+    *,
+    cortex_error: CortexError | None = None,
+) -> JSONResponse:
+    upstream_code = (
+        redact(cortex_error.upstream_code)
+        if cortex_error is not None and cortex_error.upstream_code
+        else None
+    )
+    upstream_message = (
+        redact(cortex_error.upstream_message)
+        if cortex_error is not None and cortex_error.upstream_message
+        else None
+    )
+    upstream_action = (
+        redact(cortex_error.upstream_suggested_action)
+        if cortex_error is not None and cortex_error.upstream_suggested_action
+        else None
+    )
+    suggested_action = upstream_action or action_for(code)
     payload = ErrorResponse(
         requestId=_request_id(request),
         code=code.value,
         message=redact(message),
         stage=_STAGE[code],
-        suggestedAction=action_for(code),
+        suggestedAction=suggested_action,
+        suggestedActionSource="upstream" if upstream_action else "local",
+        upstreamCode=upstream_code,
+        upstreamMessage=upstream_message,
+        upstreamSuggestedAction=upstream_action,
     )
     return JSONResponse(status_code=_STATUS[code], content=payload.model_dump(mode="json"))
-
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
@@ -81,7 +106,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(CortexError)
     async def cortex_error(request: Request, exc: CortexError):
-        return _response(request, exc.code, exc.message)
+        return _response(request, exc.code, exc.message, cortex_error=exc)
 
     @app.exception_handler(ConfigError)
     async def configuration_error(request: Request, _exc: ConfigError):

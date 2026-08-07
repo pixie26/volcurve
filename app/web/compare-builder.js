@@ -154,6 +154,28 @@
     element.addEventListener(event, handler);
   }
 
+  function apiErrorSummary(error, fallback = "请求失败") {
+    const payload = error?.payload || {};
+    const parts = [];
+    if (payload.code) parts.push(payload.code);
+    parts.push(payload.message || error?.message || fallback);
+    if (payload.suggestedAction) parts.push(`建议：${payload.suggestedAction}`);
+    if (payload.requestId) parts.push(`Request ${payload.requestId}`);
+    return parts.filter(Boolean).join(" · ");
+  }
+
+  function apiErrorMeta(error, fallback = "请求失败") {
+    const payload = error?.payload || {};
+    return {
+      message: payload.message || error?.message || fallback,
+      errorCode: payload.code || null,
+      suggestedAction: payload.suggestedAction || null,
+      suggestedActionSource: payload.suggestedActionSource || null,
+      requestId: payload.requestId || error?.requestId || null,
+      stage: payload.stage || null,
+    };
+  }
+
   function initIndicatorBuilder() {
     on("indicatorType", "change", (event) => {
       const next = defaultDraft(event.target.value);
@@ -934,7 +956,13 @@
     } else if (matches && discovery.status === "error") {
       expiryOptions = '<option value="">Listed expiries unavailable</option>';
       disabled = "disabled";
-      note = `读取失败：${escapeHtml(discovery.message || "unknown error")}`;
+      const parts = [
+        discovery.errorCode,
+        discovery.message || "unknown error",
+        discovery.suggestedAction ? `建议：${discovery.suggestedAction}` : null,
+        discovery.requestId ? `Request ${discovery.requestId}` : null,
+      ].filter(Boolean);
+      note = parts.map(escapeHtml).join(" · ");
     }
 
     return `<div class="field-grid two config-grid listed-expiry-direct">
@@ -972,7 +1000,14 @@
       if (expiry && discovery?.strikeStatus === "loading" && discovery?.strikeExpiry === expiry) {
         strikeNote = `正在加载 ${expiry} 的 available strikes…`;
       } else if (expiry && discovery?.strikeStatus === "error" && discovery?.strikeExpiry === expiry) {
-        strikeNote = `Strike list 读取失败：${escapeHtml(discovery.strikeMessage || "unknown error")}；仍可手动输入绝对 strike。`;
+        const parts = [
+          discovery.strikeErrorCode,
+          `Strike list 读取失败：${discovery.strikeMessage || "unknown error"}`,
+          discovery.strikeSuggestedAction ? `建议：${discovery.strikeSuggestedAction}` : null,
+          discovery.strikeRequestId ? `Request ${discovery.strikeRequestId}` : null,
+          "仍可手动输入绝对 strike。",
+        ].filter(Boolean);
+        strikeNote = parts.map(escapeHtml).join(" · ");
       } else if (expiry && strikeReady) {
         strikeNote = `${expiry}：${strikes.length} 个 available strikes；可直接输入任意正数，也可从下拉建议选择。`;
       }
@@ -1203,11 +1238,17 @@
         || indicatorState.draft.expiry !== expiry
       ) return;
 
+      const errorMeta = apiErrorMeta(error, "available strikes 加载失败");
       indicatorState.discovery = {
         ...indicatorState.discovery,
         strikeStatus: "error",
         strikeExpiry: expiry,
-        strikeMessage: error.payload?.message || error.message,
+        strikeMessage: errorMeta.message,
+        strikeErrorCode: errorMeta.errorCode,
+        strikeSuggestedAction: errorMeta.suggestedAction,
+        strikeSuggestedActionSource: errorMeta.suggestedActionSource,
+        strikeRequestId: errorMeta.requestId,
+        strikeStage: errorMeta.stage,
         strikes: [],
       };
     }
@@ -1295,7 +1336,7 @@
         status: "error",
         code,
         date,
-        message: error.payload?.message || error.message,
+        ...apiErrorMeta(error, "listed expiries 加载失败"),
       };
     }
 
@@ -1583,7 +1624,7 @@
       indicatorState.bulkInstrumentCode = null;
       hideBulkInstrumentResults();
       syncBulkInstrumentButtons();
-      if (help) help.textContent = `搜索失败：${error.payload?.message || error.message}`;
+      if (help) help.textContent = `搜索失败：${apiErrorSummary(error, "instrument catalogue 搜索失败")}`;
     }
   }
 
@@ -2096,7 +2137,7 @@
       item.status = "ready";
     } catch (error) {
       item.status = "error";
-      item.error = error.payload?.message || error.message || "指标加载失败";
+      item.error = apiErrorSummary(error, "指标加载失败");
       item.response = null;
     }
     refreshWorkspacePanels();
@@ -3557,3 +3598,5 @@
   // VOLCURVE_LISTED_DATE_RACE_FIX_V1_8_1
 
   // VOLCURVE_LISTED_DATE_KEYBOARD_FIX_V1_8_2
+
+  // VOLCURVE_ERROR_PROVENANCE_V1_9

@@ -101,7 +101,10 @@
         setStatus(`HTTP ${response.status} · ${upstreamMs} · cid ${data.correlationId || "—"} · request ${requestId}`);
         setResponse(data.payload);
       } else {
-        setStatus(`HTTP ${response.status} · ${browserMs} ms · request ${requestId}`, true);
+        const actionSource = data?.suggestedActionSource
+          ? ` · action ${data.suggestedActionSource}`
+          : "";
+        setStatus(`HTTP ${response.status} · ${browserMs} ms · request ${requestId}${actionSource}`, true);
         setResponse(data);
       }
     } catch (error) {
