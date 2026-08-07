@@ -4,7 +4,7 @@
   const STORAGE_KEY = "volcurve.compare.workspace.v1";
   const BOARD_STORAGE_KEY = "volcurve.compare.boards.v1";
   const STATS_STORAGE_KEY = "volcurve.compare.statscolumns.v1";
-  const MAX_CHARTS = 5;
+  const MAX_CHARTS = 8;
   const indicatorState = {
     items: [],
     nextId: 1,
@@ -13,6 +13,9 @@
     selectedDetailId: null,
     restorePending: false,
     chartCount: 1,
+    chartOrder: [1],
+    chartNames: [""],
+    chartDragSource: null,
     hoverSyncing: false,
     zoomSyncing: false,
     seriesIndex: new Map(),
@@ -182,6 +185,11 @@
     on("bulkMaturityCopyButton", "click", () => applyBulkMaturity({ copy: true }));
     on("addChartButton", "click", addChartLane);
     on("indicatorCharts", "click", handleChartStackClick);
+    on("indicatorCharts", "dblclick", handleChartNameDoubleClick);
+    on("indicatorCharts", "dragstart", handleChartDragStart);
+    on("indicatorCharts", "dragover", handleChartDragOver);
+    on("indicatorCharts", "drop", handleChartDrop);
+    on("indicatorCharts", "dragend", clearChartDragState);
     on("savedIndicators", "change", handleSavedIndicatorChange);
     on("savedIndicators", "click", handleSavedIndicatorClick);
     on("detailIndicatorSelect", "change", (event) => {
@@ -306,8 +314,8 @@
     const compare = document.querySelector('input[name="queryKind"]:checked')?.value === "compare";
     const lane = $("draftChartLane");
     if (lane) {
-      lane.innerHTML = Array.from({ length: indicatorState.chartCount }, (_, index) => index + 1)
-        .map((value) => `<option value="${value}">坐标 ${value}</option>`).join("");
+      lane.innerHTML = indicatorState.chartOrder
+        .map((value) => `<option value="${value}">${escapeHtml(chartDisplayName(value))}</option>`).join("");
       lane.value = indicatorState.draft.chartLane;
       if (!lane.value) {
         lane.value = "1";
@@ -375,6 +383,8 @@
       });
       const largestLane = Math.max(1, ...indicatorState.items.map((item) => Number(item.config.chartLane) || 1));
       indicatorState.chartCount = Math.min(MAX_CHARTS, Math.max(largestLane, Number(stored.chartCount) || 1));
+      indicatorState.chartOrder = normalizeChartOrder(stored.chartOrder, indicatorState.chartCount);
+      indicatorState.chartNames = normalizeChartNames(stored.chartNames, indicatorState.chartCount);
       indicatorState.draft.instrumentCode = $("instrumentCode").value.trim();
       indicatorState.draft.chartLane = "1";
       indicatorState.nextId = Math.max(0, ...indicatorState.items.map((item) => item.id)) + 1;
@@ -417,6 +427,8 @@
         selectedDetailId: indicatorState.selectedDetailId,
         activeBoardId: indicatorState.activeBoardId,
         chartCount: indicatorState.chartCount,
+        chartOrder: [...indicatorState.chartOrder],
+        chartNames: [...indicatorState.chartNames],
         columnWidths: indicatorState.columnWidths,
         items: indicatorState.items.map(serializeItem),
       }));
@@ -450,6 +462,8 @@
           dateMode: board.dateMode === "sliding" ? "sliding" : "fixed",
           slidingWindow: normalizeSlidingWindow(board.slidingWindow),
           chartCount: clampLaneCount(board.chartCount),
+          chartOrder: normalizeChartOrder(board.chartOrder, clampLaneCount(board.chartCount)),
+          chartNames: normalizeChartNames(board.chartNames, clampLaneCount(board.chartCount)),
           columnWidths: normalizeColumnWidths(board.columnWidths),
           items: normalizeBoardItems(board.items),
         }];
@@ -473,6 +487,36 @@
   function clampLaneCount(value) {
     const count = Number(value);
     return Number.isInteger(count) ? Math.min(MAX_CHARTS, Math.max(1, count)) : 1;
+  }
+
+  function normalizeChartOrder(raw, count) {
+    const valid = [];
+    const seen = new Set();
+    if (Array.isArray(raw)) {
+      for (const value of raw) {
+        const lane = Number(value);
+        if (!Number.isInteger(lane) || lane < 1 || lane > count || seen.has(lane)) continue;
+        seen.add(lane);
+        valid.push(lane);
+      }
+    }
+    for (let lane = 1; lane <= count; lane += 1) {
+      if (!seen.has(lane)) valid.push(lane);
+    }
+    return valid;
+  }
+
+  function normalizeChartNames(raw, count) {
+    const source = Array.isArray(raw) ? raw : [];
+    return Array.from({ length: count }, (_, index) => {
+      const value = typeof source[index] === "string" ? source[index].trim().slice(0, 40) : "";
+      return value === `坐标 ${index + 1}` ? "" : value;
+    });
+  }
+
+  function chartDisplayName(lane) {
+    const custom = indicatorState.chartNames[lane - 1]?.trim();
+    return custom || `坐标 ${lane}`;
   }
 
   function normalizeSlidingWindow(value) {
@@ -526,6 +570,8 @@
       startDate: sliding ? null : snapshot.startDate,
       endDate: sliding ? null : snapshot.endDate,
       chartCount: snapshot.chartCount,
+      chartOrder: snapshot.chartOrder || [],
+      chartNames: snapshot.chartNames || [],
       columnWidths: snapshot.columnWidths || {},
       items: (snapshot.items || []).map((item) => ({
         id: item.id, type: item.type, active: item.active, config: item.config,
@@ -578,6 +624,8 @@
       dateMode: indicatorState.dateMode,
       slidingWindow: indicatorState.slidingWindow,
       chartCount: indicatorState.chartCount,
+      chartOrder: [...indicatorState.chartOrder],
+      chartNames: [...indicatorState.chartNames],
       columnWidths: { ...indicatorState.columnWidths },
       items: indicatorState.items.map((item) => structuredClone(serializeItem(item))),
     };
@@ -664,6 +712,8 @@
     }));
     const largestLane = Math.max(1, ...indicatorState.items.map((item) => Number(item.config.chartLane) || 1));
     indicatorState.chartCount = Math.min(MAX_CHARTS, Math.max(largestLane, board.chartCount));
+    indicatorState.chartOrder = normalizeChartOrder(board.chartOrder, indicatorState.chartCount);
+    indicatorState.chartNames = normalizeChartNames(board.chartNames, indicatorState.chartCount);
     indicatorState.nextId = Math.max(0, ...indicatorState.items.map((item) => item.id)) + 1;
     indicatorState.activeBoardId = board.id;
     indicatorState.selectedDetailId = null;
@@ -1910,6 +1960,8 @@
   function addChartLane() {
     if (indicatorState.chartCount >= MAX_CHARTS) return;
     indicatorState.chartCount += 1;
+    indicatorState.chartOrder.push(indicatorState.chartCount);
+    indicatorState.chartNames.push("");
     indicatorState.draft.chartLane = String(indicatorState.chartCount);
     persistWorkspace();
     renderScopeFields();
@@ -1922,12 +1974,16 @@
     const lane = Number(button.dataset.chartRemove);
     if (!Number.isInteger(lane) || lane < 1 || lane > indicatorState.chartCount || indicatorState.chartCount <= 1) return;
     if (indicatorState.items.some((item) => Number(item.config.chartLane) === lane)) {
-      showIndicatorFormError(`坐标 ${lane} 仍有 indicator；请先在保存卡片中移动或删除这些 indicator。`);
+      showIndicatorFormError(`${chartDisplayName(lane)} 仍有 indicator；请先在保存卡片中移动或删除这些 indicator。`);
       return;
     }
     for (const item of indicatorState.items) {
       if (Number(item.config.chartLane) > lane) item.config.chartLane = String(Number(item.config.chartLane) - 1);
     }
+    indicatorState.chartOrder = indicatorState.chartOrder
+      .filter((value) => value !== lane)
+      .map((value) => value > lane ? value - 1 : value);
+    indicatorState.chartNames.splice(lane - 1, 1);
     indicatorState.chartCount -= 1;
     const draftLane = Number(indicatorState.draft.chartLane);
     if (draftLane > lane) indicatorState.draft.chartLane = String(draftLane - 1);
@@ -1935,6 +1991,95 @@
     persistWorkspace();
     renderScopeFields();
     refreshWorkspacePanels({ details: false });
+  }
+
+  function handleChartNameDoubleClick(event) {
+    const host = event.target.closest("[data-chart-name]");
+    if (host) startChartNameEdit(host);
+  }
+
+  function startChartNameEdit(host) {
+    const lane = Number(host.dataset.chartName);
+    if (!Number.isInteger(lane) || host.querySelector("input")) return;
+    const input = document.createElement("input");
+    input.className = "chart-name-input";
+    input.value = chartDisplayName(lane);
+    input.maxLength = 40;
+    host.textContent = "";
+    host.appendChild(input);
+    input.focus();
+    input.select();
+
+    const commit = (save) => {
+      input.removeEventListener("blur", onBlur);
+      if (save) {
+        const value = input.value.trim().slice(0, 40);
+        indicatorState.chartNames[lane - 1] = value && value !== `坐标 ${lane}` ? value : "";
+        persistWorkspace();
+        renderScopeFields();
+      }
+      refreshWorkspacePanels({ details: false });
+    };
+    const onBlur = () => commit(true);
+    input.addEventListener("keydown", (keyEvent) => {
+      keyEvent.stopPropagation();
+      if (keyEvent.key === "Enter") {
+        keyEvent.preventDefault();
+        commit(true);
+      } else if (keyEvent.key === "Escape") {
+        keyEvent.preventDefault();
+        commit(false);
+      }
+    });
+    input.addEventListener("blur", onBlur);
+  }
+
+  function handleChartDragStart(event) {
+    const handle = event.target.closest("[data-chart-drag]");
+    if (!handle) return;
+    const lane = Number(handle.dataset.chartDrag);
+    if (!Number.isInteger(lane)) return;
+    indicatorState.chartDragSource = lane;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(lane));
+    handle.closest("[data-chart-lane]")?.classList.add("is-dragging");
+  }
+
+  function handleChartDragOver(event) {
+    if (indicatorState.chartDragSource === null) return;
+    const panel = event.target.closest("[data-chart-lane]");
+    if (!panel) return;
+    const target = Number(panel.dataset.chartLane);
+    if (!Number.isInteger(target) || target === indicatorState.chartDragSource) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    document.querySelectorAll("#indicatorCharts .is-drop-target")
+      .forEach((element) => element.classList.remove("is-drop-target"));
+    panel.classList.add("is-drop-target");
+  }
+
+  function handleChartDrop(event) {
+    if (indicatorState.chartDragSource === null) return;
+    const panel = event.target.closest("[data-chart-lane]");
+    if (!panel) return;
+    const target = Number(panel.dataset.chartLane);
+    const source = indicatorState.chartDragSource;
+    event.preventDefault();
+    clearChartDragState();
+    if (!Number.isInteger(target) || source === target) return;
+    const from = indicatorState.chartOrder.indexOf(source);
+    const to = indicatorState.chartOrder.indexOf(target);
+    if (from < 0 || to < 0) return;
+    moveWithin(indicatorState.chartOrder, from, to);
+    persistWorkspace();
+    renderScopeFields();
+    refreshWorkspacePanels({ details: false });
+  }
+
+  function clearChartDragState() {
+    indicatorState.chartDragSource = null;
+    document.querySelectorAll("#indicatorCharts .is-dragging, #indicatorCharts .is-drop-target")
+      .forEach((element) => element.classList.remove("is-dragging", "is-drop-target"));
   }
 
   function handleSavedIndicatorClick(event) {
@@ -1979,7 +2124,7 @@
       return;
     }
     const bulkTargets = indicatorState.bulkMode ? bulkTargetIds() : new Set();
-    const laneOptions = (selected) => Array.from({ length: indicatorState.chartCount }, (_, index) => index + 1).map((lane) => `<option value="${lane}" ${String(lane) === String(selected) ? "selected" : ""}>坐标 ${lane}</option>`).join("");
+    const laneOptions = (selected) => indicatorState.chartOrder.map((lane) => `<option value="${lane}" ${String(lane) === String(selected) ? "selected" : ""}>${escapeHtml(chartDisplayName(lane))}</option>`).join("");
     $("savedIndicators").innerHTML = indicatorState.items.map((item) => {
       const label = escapeHtml(indicatorLabel(item));
       const picked = bulkTargets.has(item.id);
@@ -2053,7 +2198,7 @@
 
   function indicatorDetail(item) {
     const wire = `${item.config.volatilityConvention} · ${item.config.layout}`;
-    const placement = `坐标 ${item.config.chartLane}`;
+    const placement = chartDisplayName(Number(item.config.chartLane));
     if (item.type === "derived") return `${placement} · 浏览器本地按共同观察日计算 · 不发送新的取数请求`;
     if (item.type === "realized_vol") return `${placement} · price-return RV · spot via reference 3M K/F 100% · ${wire} carrier`;
     if (item.type === "spot") return `${placement} · 数据源 spot · 未复权 · reference 3M K/F 100% · ${wire} carrier`;
@@ -2075,7 +2220,7 @@
     const ready = active.filter((item) => indicatorState.seriesIndex.get(item.id)?.points);
     const start = $("startDate").value;
     const end = $("endDate").value;
-    for (let lane = 1; lane <= indicatorState.chartCount; lane += 1) {
+    for (const lane of indicatorState.chartOrder) {
       const laneActive = active.filter((item) => Number(item.config.chartLane) === lane);
       const laneReady = ready.filter((item) => Number(item.config.chartLane) === lane);
       const traces = laneReady.map((item) => indicatorTrace(item));
@@ -2110,22 +2255,28 @@
     const instruments = new Set(indicatorState.items.filter((item) => item.type !== "derived").map((item) => item.config.instrumentCode));
     $("timeseriesStatus").textContent = `${indicatorState.chartCount}/${MAX_CHARTS} charts · ${active.length} active`;
     $("timeseriesTitle").textContent = indicatorState.items.length ? `${instruments.size} instruments · ${indicatorState.items.length} indicators` : "空白时序图";
-    $("timeseriesSubtitle").textContent = `${start || "—"} → ${end || "—"} · hover 任一坐标会同时读出该日期在全部坐标上的数值，X 轴缩放同步。`;
+    $("timeseriesSubtitle").textContent = `${start || "—"} → ${end || "—"}`;
     $("addChartButton").disabled = indicatorState.chartCount >= MAX_CHARTS;
     renderIndicatorWarnings(active);
   }
 
   function renderChartShells() {
     const container = $("indicatorCharts");
-    if (Number(container.dataset.chartCount) === indicatorState.chartCount) return;
+    const signature = `${indicatorState.chartOrder.join(",")}|${indicatorState.chartNames.join("\u001f")}`;
+    if (container.dataset.chartSignature === signature) return;
     chartDivs().forEach((div) => Plotly.purge(div));
-    container.dataset.chartCount = String(indicatorState.chartCount);
-    container.innerHTML = Array.from({ length: indicatorState.chartCount }, (_, index) => {
-      const lane = index + 1;
+    container.dataset.chartSignature = signature;
+    container.innerHTML = indicatorState.chartOrder.map((lane) => {
       const removeButton = indicatorState.chartCount > 1
         ? `<button class="remove-chart-button" type="button" data-chart-remove="${lane}">删除坐标</button>` : "";
       return `<article class="panel chart-panel timeseries-panel" data-chart-lane="${lane}">
-        <div class="panel-heading"><div><p class="eyebrow">CHART ${lane}</p><h3>坐标 ${lane}</h3></div><div class="chart-pane-actions"><span id="chartPaneCount-${lane}" class="chart-pane-count">0 active</span><span class="axis-note">左轴：波动率 % · 右轴：价格与比值 · 框选缩放</span>${removeButton}</div></div>
+        <div class="panel-heading">
+          <div class="chart-pane-heading">
+            <span class="chart-drag-handle" draggable="true" data-chart-drag="${lane}" title="拖动调整坐标上下顺序" aria-label="拖动 ${escapeHtml(chartDisplayName(lane))}">⠿</span>
+            <div><p class="eyebrow">CHART ${lane}</p><h3 data-chart-name="${lane}" title="双击改坐标名称">${escapeHtml(chartDisplayName(lane))}</h3></div>
+          </div>
+          <div class="chart-pane-actions"><span id="chartPaneCount-${lane}" class="chart-pane-count">0 active</span><span class="axis-note">左轴：波动率 % · 右轴：价格与比值 · 框选缩放</span>${removeButton}</div>
+        </div>
         <div id="indicatorChart-${lane}" class="chart timeseries-chart"></div>
       </article>`;
     }).join("");
@@ -2167,7 +2318,7 @@
       return;
     }
     const lanes = [];
-    for (let lane = 1; lane <= indicatorState.chartCount; lane += 1) {
+    for (const lane of indicatorState.chartOrder) {
       const rows = active
         .filter((item) => Number(item.config.chartLane) === lane)
         .map((item) => {
@@ -2177,7 +2328,7 @@
           const missing = value === undefined || value === null ? " is-missing" : "";
           return `<li><i style="background:${itemColor(item)}"></i><span>${escapeHtml(indicatorLabel(item))}</span><strong class="readout-value${missing}">${escapeHtml(text)}</strong></li>`;
         });
-      if (rows.length) lanes.push(`<div class="readout-lane"><small>坐标 ${lane}</small><ul>${rows.join("")}</ul></div>`);
+      if (rows.length) lanes.push(`<div class="readout-lane"><small>${escapeHtml(chartDisplayName(lane))}</small><ul>${rows.join("")}</ul></div>`);
     }
     if (!lanes.length) {
       box.classList.add("is-hidden");
@@ -2279,7 +2430,7 @@
     const request = item.request.volatilityRequest;
     $("resultEyebrow").textContent = "INDICATOR DETAIL";
     $("resultTitle").textContent = indicatorLabel(item);
-    $("resultSubtitle").textContent = `坐标 ${item.config.chartLane} · ${request.start_date} → ${request.end_date} · 当前只展示所选 indicator 的数据与后台记录`;
+    $("resultSubtitle").textContent = `${chartDisplayName(Number(item.config.chartLane))} · ${request.start_date} → ${request.end_date} · 当前只展示所选 indicator 的数据与后台记录`;
     $("cacheBadge").textContent = item.response.source.cacheStatus.toUpperCase();
     $("requestIdBadge").textContent = `Request ${item.response.requestId}`;
   }
@@ -2746,7 +2897,7 @@
 
   function statCell(column, item, stats) {
     if (!stats) return '<td class="cell-missing">—</td>';
-    if (column.id === "lane") return `<td>坐标 ${escapeHtml(item.config.chartLane)}</td>`;
+    if (column.id === "lane") return `<td>${escapeHtml(chartDisplayName(Number(item.config.chartLane)))}</td>`;
     const value = stats[column.id];
     if (column.kind === "text") return `<td>${escapeHtml(value ?? "—")}</td>`;
     if (column.kind === "count") return `<td class="stat-number">${escapeHtml(formatNumber(value, 0))}</td>`;
