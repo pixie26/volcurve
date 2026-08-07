@@ -32,6 +32,7 @@
     // never persisted, so reopening the page or loading a board never restores a stale one.
     bulkMode: false,
     bulkSelection: new Set(),
+    bulkInstrumentCode: null,
   };
 
   // A sliding range is re-derived from today every time the workspace or a board opens,
@@ -167,6 +168,10 @@
     on("bulkMoveButton", "click", () => applyBulkInstrument({ copy: false }));
     on("bulkCopyButton", "click", () => applyBulkInstrument({ copy: true }));
     on("bulkBar", "click", handleBulkBarClick);
+    on("bulkInstrumentSearchButton", "click", searchBulkInstruments);
+    on("bulkInstrumentCode", "input", clearBulkInstrumentSelection);
+    on("bulkInstrumentCode", "keydown", handleBulkInstrumentKeydown);
+    on("bulkInstrumentResults", "click", handleBulkInstrumentResultClick);
     on("addChartButton", "click", addChartLane);
     on("indicatorCharts", "click", handleChartStackClick);
     on("savedIndicators", "change", handleSavedIndicatorChange);
@@ -181,6 +186,11 @@
     }
     document.querySelectorAll('input[name="queryKind"]').forEach((input) => {
       input.addEventListener("change", syncWorkspaceMode);
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("#bulkInstrumentResults, #bulkInstrumentCode, #bulkInstrumentSearchButton")) {
+        hideBulkInstrumentResults();
+      }
     });
     window.addEventListener("volcurve:capabilities", () => {
       renderIndicatorConfig();
@@ -1069,10 +1079,15 @@
   function toggleBulkMode(on) {
     indicatorState.bulkMode = on ?? !indicatorState.bulkMode;
     indicatorState.bulkSelection = new Set();
+    indicatorState.bulkInstrumentCode = null;
     hideIndicatorFormError();
     setBulkNote("");
+    const bulkInput = $("bulkInstrumentCode");
+    if (bulkInput) bulkInput.value = "";
+    hideBulkInstrumentResults();
     $("bulkBar").classList.toggle("is-hidden", !indicatorState.bulkMode);
     $("bulkModeButton").classList.toggle("is-on", indicatorState.bulkMode);
+    syncBulkInstrumentButtons();
     renderSavedIndicators();
   }
 
@@ -1113,6 +1128,7 @@
     $("bulkCount").textContent = pulled
       ? `已选 ${indicatorState.bulkSelection.size} 项（含运算指标带入的 ${pulled} 个操作数，共 ${targets.size} 项）`
       : `已选 ${targets.size} 项`;
+    syncBulkInstrumentButtons();
   }
 
   function setBulkNote(message, tone = "") {
@@ -1120,6 +1136,114 @@
     if (!note) return;
     note.textContent = message;
     note.className = `bulk-note ${tone}`.trim();
+  }
+
+  function syncBulkInstrumentButtons() {
+    const enabled = Boolean(indicatorState.bulkInstrumentCode) && bulkTargetIds().size > 0;
+    const move = $("bulkMoveButton");
+    const copy = $("bulkCopyButton");
+    if (move) move.disabled = !enabled;
+    if (copy) copy.disabled = !enabled;
+  }
+
+  function clearBulkInstrumentSelection() {
+    const typed = $("bulkInstrumentCode")?.value.trim() || "";
+    if (typed === indicatorState.bulkInstrumentCode) return;
+    indicatorState.bulkInstrumentCode = null;
+    setBulkNote("");
+    const help = $("bulkInstrumentHelp");
+    if (help) help.textContent = "输入代码或名称后按 Enter 或点 ⌕ 搜索，再从结果里点选。";
+    syncBulkInstrumentButtons();
+  }
+
+  function handleBulkInstrumentKeydown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchBulkInstruments();
+    } else if (event.key === "Escape") {
+      hideBulkInstrumentResults();
+    }
+  }
+
+  async function searchBulkInstruments() {
+    const input = $("bulkInstrumentCode");
+    const query = input?.value.trim() || "";
+    if (!query) {
+      indicatorState.bulkInstrumentCode = null;
+      hideBulkInstrumentResults();
+      syncBulkInstrumentButtons();
+      return setBulkNote("请输入目标标的的代码或名称。", "is-error");
+    }
+    const help = $("bulkInstrumentHelp");
+    if (help) help.textContent = "正在搜索 instrument catalogue…";
+    setBulkNote("");
+    try {
+      const endpoint = `${state.capabilities.endpoints.instruments}?q=${encodeURIComponent(query)}&type=equity&maxResults=50`;
+      const response = await apiFetch(endpoint);
+      const data = await response.json();
+      const instruments = data.instruments || [];
+      const exact = instruments.find(
+        (item) => String(item.code || "").toLocaleLowerCase() === query.toLocaleLowerCase(),
+      );
+      if (exact) {
+        selectBulkInstrument(exact.code);
+        return;
+      }
+      renderBulkInstrumentResults(instruments);
+      if (help) {
+        help.textContent = data.hasMore
+          ? `匹配 ${data.matchedCount} 项，仅显示前 ${data.returnedCount} 项；请缩小关键词后重新搜索。`
+          : `匹配 ${data.matchedCount} 项；点击下方结果即可选用。`;
+      }
+    } catch (error) {
+      indicatorState.bulkInstrumentCode = null;
+      hideBulkInstrumentResults();
+      syncBulkInstrumentButtons();
+      if (help) help.textContent = `搜索失败：${error.payload?.message || error.message}`;
+    }
+  }
+
+  function renderBulkInstrumentResults(instruments) {
+    const box = $("bulkInstrumentResults");
+    if (!box) return;
+    if (!instruments.length) {
+      box.innerHTML = '<p class="instrument-empty">没有匹配的 instrument。</p>';
+      box.classList.remove("is-hidden");
+      return;
+    }
+    box.innerHTML = instruments.map((item) => {
+      const meta = [item.type, item.marketName, item.currencyCode].filter(Boolean).join(" · ");
+      return `<button type="button" class="instrument-result" role="option" data-bulk-instrument-code="${escapeHtml(item.code)}">
+        <strong>${escapeHtml(item.code)}</strong>
+        <span>${escapeHtml(item.companyName || item.bbgCode || "")}</span>
+        ${meta ? `<em>${escapeHtml(meta)}</em>` : ""}
+      </button>`;
+    }).join("");
+    box.classList.remove("is-hidden");
+  }
+
+  function handleBulkInstrumentResultClick(event) {
+    const choice = event.target.closest("[data-bulk-instrument-code]");
+    if (!choice) return;
+    selectBulkInstrument(choice.dataset.bulkInstrumentCode);
+  }
+
+  function selectBulkInstrument(code) {
+    const input = $("bulkInstrumentCode");
+    if (input) input.value = code;
+    indicatorState.bulkInstrumentCode = code;
+    hideBulkInstrumentResults();
+    const help = $("bulkInstrumentHelp");
+    if (help) help.textContent = `已选择 ${code}。`;
+    setBulkNote("");
+    syncBulkInstrumentButtons();
+  }
+
+  function hideBulkInstrumentResults() {
+    const box = $("bulkInstrumentResults");
+    if (!box) return;
+    box.classList.add("is-hidden");
+    box.innerHTML = "";
   }
 
   // What identifies an indicator as a series: not its name, and not which lane it sits in.
@@ -1132,8 +1256,8 @@
 
   function applyBulkInstrument({ copy }) {
     hideIndicatorFormError();
-    const code = $("bulkInstrumentCode").value.trim();
-    if (!code) return setBulkNote("请先填写目标 instrument code。", "is-error");
+    const code = indicatorState.bulkInstrumentCode;
+    if (!code) return setBulkNote("请先搜索并选择目标标的。", "is-error");
     const targets = indicatorState.items.filter((item) => bulkTargetIds().has(item.id));
     const repointable = targets.filter((item) => item.type !== "derived");
     if (!repointable.length) {

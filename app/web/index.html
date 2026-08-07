@@ -117,9 +117,16 @@
                 <span class="bulk-bar-links"><button class="text-button" type="button" data-bulk-all>全选基础指标</button><button class="text-button" type="button" data-bulk-none>清空</button><button class="text-button" type="button" data-bulk-exit>退出批量</button></span>
               </div>
               <div class="bulk-bar-row bulk-bar-apply">
-                <input id="bulkInstrumentCode" placeholder="目标 instrument code" autocomplete="off" aria-label="批量操作的目标 instrument code" />
-                <button id="bulkMoveButton" class="secondary-button" type="button">换成此标的</button>
-                <button id="bulkCopyButton" class="secondary-button" type="button">复制为此标的</button>
+                <div class="bulk-instrument-picker">
+                  <div class="input-action">
+                    <input id="bulkInstrumentCode" placeholder="搜索目标标的" autocomplete="off" aria-label="批量操作的目标标的" />
+                    <button id="bulkInstrumentSearchButton" class="icon-button" type="button" title="搜索目标标的">⌕</button>
+                  </div>
+                  <div id="bulkInstrumentResults" class="instrument-results is-hidden" role="listbox" aria-label="批量改标搜索结果"></div>
+                  <small id="bulkInstrumentHelp">输入代码或名称后按 Enter 或点 ⌕ 搜索，再从结果里点选。</small>
+                </div>
+                <button id="bulkMoveButton" class="secondary-button" type="button" disabled>换成此标的</button>
+                <button id="bulkCopyButton" class="secondary-button" type="button" disabled>复制为此标的</button>
               </div>
               <p id="bulkNote" class="bulk-note"></p>
             </div>
