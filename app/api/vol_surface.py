@@ -31,6 +31,15 @@ def surface(
         if exc.code in {ErrorCode.AUTHENTICATION_FAILED, ErrorCode.UPSTREAM_UNAVAILABLE}:
             mark_connectivity(False)
         raise
+
+    # A wider covering-cache entry can legitimately contain no observations inside a
+    # narrower requested window (weekend/holiday/gap).  Returning 200 with an empty surface
+    # makes cache-backed semantics differ from the same exact live request, which Cortex
+    # reports as NO_DATA.  Keep the public contract source-independent: an empty surface is
+    # always NO_DATA, never a successful [] payload.
+    if not snapshots:
+        raise CortexError(ErrorCode.NO_DATA, "该日期区间内没有可用观测")
+
     if fetch_result.cache_status == "live":
         mark_connectivity(True)
     return build_surface_response(
