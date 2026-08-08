@@ -15,6 +15,11 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Frontend test tooling
+node_modules/
+playwright-report/
+test-results/
+
 # OS / editor
 Thumbs.db
 .DS_Store
