@@ -13,17 +13,17 @@ from app.domain.requests import VolatilityRequest
 from app.domain.responses import (
     ActivityEvent,
     CompareResponse,
-    CompareSummary,
     DataIssue,
-    Methodology,
     RequestAudit,
+    UpstreamRequestAudit,
+    CompareSummary,
+    Methodology,
     SeriesPoint,
     SourceInfo,
     SurfaceApiPoint,
     SurfaceApiSnapshot,
     SurfaceQualitySummary,
     SurfaceResponse,
-    UpstreamRequestAudit,
     build_quality_contract,
     iv_label,
     rv_label,
@@ -38,194 +38,361 @@ _INVALID_IV_FLAGS = {
 }
 
 
-def build_compare_response(execution: CompareExecution) -> CompareResponse:
-    request = execution.request
-    observations = execution.load.observations
-    quality_contract = build_quality_contract(observations)
-    series = []
-    if execution.analytics is not None:
-        series = _series_points(execution.analytics.series)
-    return CompareResponse(
-        requestId=execution.request_id,
-        summary=CompareSummary(
-            instrument=request.code,
-            startDate=request.start_date,
-            endDate=request.end_date,
-            ivLabel=iv_label(request),
-            rvLabel=rv_label(request),
-            observationCount=len(observations),
-            analyticsPointCount=len(series),
+def _percent(value: float | None) -> float | None:
+    return None if value is None else value * 100.0
+
+
+def _raw_percent(value: float | None) -> float | str | None:
+    if value is None:
+        return None
+    if math.isfinite(value):
+        return value * 100.0
+    if math.isnan(value):
+        return "NaN"
+    return "Infinity" if value > 0 else "-Infinity"
+
+
+def _source_info(client, request: VolatilityRequest, fetch_results, warmup_from) -> SourceInfo:
+    statuses = list(dict.fromkeys(result.cache_status for result in fetch_results))
+    cache_status = statuses[0] if len(statuses) == 1 else "mixed"
+    request_ids = list(dict.fromkeys(result.correlation_id for result in fetch_results))
+    return SourceInfo(
+        provider="Cortex DataHub",
+        apiVersion=client.api_version,
+        instrumentCode=request.code,
+        retrievedAt=max(result.retrieved_at for result in fetch_results),
+        cacheStatus=cache_status,
+        requestId=request_ids[0],
+        requestIds=request_ids,
+        warmupFrom=warmup_from,
+    )
+
+
+def _fetch_activity(fetch_results) -> list[ActivityEvent]:
+    statuses = {result.cache_status for result in fetch_results}
+    events = [
+        ActivityEvent(
+            code="REQUEST_VALIDATED",
+            stage="validation",
+            message="请求字段和坐标组合已通过本地严格校验。",
+        )
+    ]
+    if "fixture" in statuses:
+        events.append(
+            ActivityEvent(
+                code="FIXTURE_LOADED",
+                stage="fetch",
+                message="已加载脱敏离线 fixture；未调用 live API。",
+            )
+        )
+    if "hit" in statuses:
+        events.append(
+            ActivityEvent(code="CACHE_HIT", stage="fetch", message="已使用校验通过的本地缓存。")
+        )
+    if "live" in statuses:
+        events.extend(
+            [
+                ActivityEvent(
+                    code="UPSTREAM_FETCH_STARTED",
+                    stage="fetch",
+                    message="已向数据源发起数据请求。",
+                ),
+                ActivityEvent(
+                    code="UPSTREAM_FETCH_COMPLETED",
+                    stage="fetch",
+                    message="数据源数据请求已完成。",
+                ),
+            ]
+        )
+    events.extend(
+        [
+            ActivityEvent(
+                code="SCHEMA_VALIDATED",
+                stage="schema",
+                message="上游响应已通过结构校验。",
+            ),
+            ActivityEvent(
+                code="COORDINATES_RESOLVED",
+                stage="normalization",
+                message="返回坐标已按精确匹配规则标准化。",
+            ),
+        ]
+    )
+    return events
+
+
+
+_ISSUE_INFO_CODES = {
+    QualityFlag.INSUFFICIENT_HISTORY.value,
+    QualityFlag.DUPLICATE_IDENTICAL_REMOVED.value,
+    QualityFlag.SOURCE_ORDER_CORRECTED.value,
+}
+
+_ISSUE_ACTIONS = {
+    QualityFlag.INSUFFICIENT_HISTORY.value: "RV 保持为空；不填充。检查历史覆盖或等待更多有效市场日期。",
+    QualityFlag.MISSING_SPOT.value: "Spot 保持为空；不做前向填充，依赖 Spot 的统计不使用该点。",
+    QualityFlag.MISSING_IV.value: "IV 保持为空；不使用邻近 maturity/strike 替代。",
+    QualityFlag.MISSING_FORWARD.value: "Forward 保持为空；不使用邻近期限替代。",
+    QualityFlag.MATURITY_MISMATCH.value: "返回期限与请求期限不一致；该点保持为空，不做最近期限替代。",
+    QualityFlag.STRIKE_MISMATCH.value: "返回 strike 与请求 strike 不一致；该点保持为空，不做最近 strike 替代。",
+    QualityFlag.DUPLICATE_IDENTICAL_REMOVED.value: "完全相同的同日重复记录已去重；数值未改写。",
+    QualityFlag.SOURCE_ORDER_CORRECTED.value: "上游日期顺序已标准化为升序；原始数值未改写。",
+    QualityFlag.INVALID_IV_ZERO.value: "raw IV 保留；effective IV 置空并从统计中排除。",
+    QualityFlag.INVALID_IV_NEGATIVE.value: "raw IV 保留；effective IV 置空并从统计中排除。",
+    QualityFlag.INVALID_IV_NON_FINITE.value: "raw IV 保留为审计值；effective IV 置空并从统计中排除。",
+    QualityFlag.SUSPICIOUS_IV_EXTREME.value: "正 IV 保留并参与计算，同时标记供人工复核。",
+    QualityFlag.RETURN_OUTLIER.value: "Spot 原值保留；只标记异常收益，不自动认定或调整公司行动。",
+    QualityFlag.STALE_DATA.value: "保留 stale 标记；如需确认最新值，请执行强制刷新。",
+    QualityFlag.SCHEMA_WARNING.value: "保留 schema warning；建议检查对应日期的上游响应。",
+}
+
+
+def _request_audit(request: VolatilityRequest, fetch_results) -> RequestAudit:
+    user_body = serialize_volatility_request(request)
+    entries = []
+    for result in fetch_results:
+        disposition = result.cache_status
+        entries.append(
+            UpstreamRequestAudit(
+                disposition=disposition,
+                sentToUpstream=disposition == "live",
+                correlationId=result.correlation_id,
+                body=getattr(result, "request_body", None) or user_body,
+            )
+        )
+    return RequestAudit(userRequestBody=user_body, upstreamRequests=entries)
+
+
+def _data_issues(request: VolatilityRequest, first_observation, series: list[SeriesPoint]) -> list[DataIssue]:
+    coordinate = iv_label(
+        first_observation.target_maturity,
+        first_observation.strike_rule,
+        first_observation.target_strike,
+    )
+    issues = []
+    for point in series:
+        for code in point.qualityFlags:
+            if code == QualityFlag.OK.value:
+                continue
+            issues.append(
+                DataIssue(
+                    severity="info" if code in _ISSUE_INFO_CODES else "warning",
+                    code=code,
+                    instrumentCode=request.code,
+                    date=point.date,
+                    coordinate=coordinate,
+                    rawImpliedVol=point.rawImpliedVol,
+                    impliedVol=point.impliedVol,
+                    realizedVol=point.realizedVol,
+                    spot=point.spot,
+                    forward=point.forward,
+                    action=_ISSUE_ACTIONS.get(
+                        code,
+                        "保留该质量标记；请在 Observation table 查看该日期的完整字段。",
+                    ),
+                )
+            )
+    return issues
+
+
+def build_compare_response(
+    *, request_id: str, client, request: VolatilityRequest, execution: CompareExecution
+) -> CompareResponse:
+    analytics = execution.analytics
+    if not execution.load.observations:
+        # Methodology is read off the first observation, so an empty window would raise an
+        # IndexError and surface as a 500. It is an ordinary "nothing here" answer instead.
+        raise CortexError(ErrorCode.NO_DATA, "该日期区间内没有可用观测")
+    first_observation = execution.load.observations[0]
+    quality, quality_events = build_quality_contract(analytics.series)
+    series = [
+        SeriesPoint(
+            date=point.date,
+            spot=point.spot,
+            forward=point.forward,
+            rawImpliedVol=_raw_percent(point.raw_implied_vol),
+            impliedVol=_percent(point.implied_vol),
+            realizedVol=_percent(point.realized_vol),
+            ivMinusRv=_percent(point.iv_minus_rv),
+            ivDividedByRv=point.iv_divided_by_rv,
+            qualityFlags=point.quality_flags,
+        )
+        for point in analytics.series
+    ]
+    raw_summary = analytics.summary
+    summary = CompareSummary(
+        latestMarketDate=raw_summary["latestMarketDate"],
+        latestIvDate=raw_summary["latestIvDate"],
+        latestIv=_percent(raw_summary["latestIv"]),
+        latestComparableDate=raw_summary["latestComparableDate"],
+        latestComparableIv=_percent(raw_summary["latestComparableIv"]),
+        latestComparableRv=_percent(raw_summary["latestComparableRv"]),
+        latestComparableSpread=_percent(raw_summary["latestComparableSpread"]),
+        latestRv=_percent(raw_summary["latestRv"]),
+        latestSpread=_percent(raw_summary["latestSpread"]),
+        spreadPercentile=raw_summary["spreadPercentile"],
+        spreadZScore=raw_summary["spreadZScore"],
+        correlation=raw_summary["correlation"],
+        observationCount=raw_summary["observationCount"],
+    )
+    activity = _fetch_activity(execution.load.fetch_results)
+    activity.extend(quality_events)
+    if not execution.load.forward_tail_complete:
+        activity.append(
+            ActivityEvent(
+                code="FORWARD_RV_INCOMPLETE",
+                stage="analytics",
+                message="Forward RV 所需的未来有效价格不足，受影响窗口保持为空。",
+                suggestedAction="等待更多市场日期可用，或缩短 RV window 后重试。",
+            )
+        )
+    activity.append(
+        ActivityEvent(
+            code="ANALYTICS_COMPLETED",
+            stage="analytics",
+            message=f"已完成 {len(series)} 个展示日期的 IV/RV 分析。",
+            affectedObservations=len(series),
+        )
+    )
+    methodology = Methodology(
+        maturity=first_observation.target_maturity,
+        strikeConvention=first_observation.strike_rule,
+        strike=first_observation.target_strike,
+        ivLabel=iv_label(
+            first_observation.target_maturity,
+            first_observation.strike_rule,
+            first_observation.target_strike,
         ),
-        source=_source_info(execution),
-        requestAudit=_request_audit(execution),
+        rvLabel=rv_label(execution.window_sessions, execution.alignment),
+        rvWindowSessions=execution.window_sessions,
+        rvAlignment=execution.alignment,
+        rvFormula="stdev(log(S_t/S_t-1), ddof=1) × sqrt(252)",
+        annualization=252,
+        volUnits="percent",
+        spotNote=(
+            "Spot 为数据源原始未复权价格；RV 是 price-return RV，未做分红或公司行动调整。"
+        ),
+        corporateActionAdjustment="none",
+    )
+    return CompareResponse(
+        requestId=request_id,
         series=series,
-        dataQuality=quality_contract,
-        methodology=_methodology(request),
-        activity=execution.activity,
-        disclosures=DISCLOSURES,
+        summary=summary,
+        methodology=methodology,
+        source=_source_info(client, request, execution.load.fetch_results, analytics.warmup_from),
+        dataQuality=quality,
+        activity=activity,
+        disclosures=list(DISCLOSURES),
+        requestAudit=_request_audit(request, execution.load.fetch_results),
+        issues=_data_issues(request, first_observation, series),
     )
 
 
 def build_surface_response(
     *,
-    request: VolatilityRequest,
     request_id: str,
+    client,
+    request: VolatilityRequest,
     snapshots: list[StandardSurfaceObservation],
-    source: SourceInfo,
-    request_audit: RequestAudit,
-    activity: list[ActivityEvent],
+    fetch_result,
 ) -> SurfaceResponse:
-    public_snapshots = [_surface_snapshot(snapshot) for snapshot in snapshots]
-    total_points = sum(len(snapshot.points) for snapshot in snapshots)
-    effective_points = sum(
-        1
-        for snapshot in snapshots
-        for point in snapshot.points
-        if point.implied_vol is not None
+    point_flags: Counter[str] = Counter()
+    snapshot_flags: Counter[str] = Counter()
+    invalid_count = 0
+    suspicious_count = 0
+    usable_count = 0
+    api_snapshots = []
+    for snapshot in snapshots:
+        snapshot_flags.update(flag.value for flag in snapshot.quality_flags if flag.value != "OK")
+        api_points = []
+        for point in snapshot.points:
+            flags = [flag.value for flag in point.quality_flags]
+            non_ok = set(flags) - {"OK"}
+            point_flags.update(non_ok)
+            invalid_count += bool(non_ok & _INVALID_IV_FLAGS)
+            suspicious_count += QualityFlag.SUSPICIOUS_IV_EXTREME.value in non_ok
+            usable_count += point.implied_vol is not None
+            api_points.append(
+                SurfaceApiPoint(
+                    maturity=point.maturity,
+                    strike=point.strike,
+                    maturityIndex=point.maturity_index,
+                    strikeIndex=point.strike_index,
+                    rawImpliedVol=_raw_percent(point.raw_implied_vol),
+                    impliedVol=_percent(point.implied_vol),
+                    qualityFlags=flags,
+                )
+            )
+        api_snapshots.append(
+            SurfaceApiSnapshot(
+                date=snapshot.date,
+                spot=snapshot.spot,
+                maturities=snapshot.maturities,
+                strikes=snapshot.strikes,
+                forwardCurve=snapshot.forward_curve,
+                discountFactors=snapshot.discount_factors,
+                points=api_points,
+                sourceTime=snapshot.source_time,
+                sourceTimezone=snapshot.source_timezone,
+                sourceTimestamp=snapshot.source_timestamp,
+                qualityFlags=[flag.value for flag in snapshot.quality_flags],
+            )
+        )
+    counts = point_flags + snapshot_flags
+    warning = None
+    if invalid_count:
+        warning = (
+            f"数据源返回 {invalid_count} 个无效 IV surface 点；原值已保留，effective IV 已置空。"
+        )
+    point_count = sum(len(snapshot.points) for snapshot in snapshots)
+    quality = SurfaceQualitySummary(
+        status="WARNINGS" if counts else "OK",
+        snapshotCount=len(snapshots),
+        pointCount=point_count,
+        usableIvCount=usable_count,
+        invalidIvCount=invalid_count,
+        suspiciousIvCount=suspicious_count,
+        flagCounts=dict(sorted(counts.items())),
+        warningBanner=warning,
+        analyticsExclusionPolicy=(
+            "rawImpliedVol 保留上游原值；非正或非有限 IV 的 impliedVol 置空，"
+            "后续 smile/term-structure 统计必须排除。"
+        ),
+    )
+    activity = _fetch_activity([fetch_result])
+    if invalid_count:
+        activity.append(
+            ActivityEvent(
+                code="INVALID_POINTS_EXCLUDED",
+                stage="normalization",
+                message=warning or "无效 surface 点已置空。",
+                affectedObservations=invalid_count,
+                suggestedAction="检查受影响日期和坐标，或改用另一组期限/strike 约定后重试。",
+            )
+        )
+    if point_count > LARGE_SURFACE_POINT_WARNING:
+        activity.append(
+            ActivityEvent(
+                code="LARGE_SURFACE_RESULT",
+                stage="normalization",
+                message=(f"Surface 包含 {point_count} 个点；结果未截断，浏览器处理可能较慢。"),
+                affectedObservations=point_count,
+                suggestedAction="缩小日期、expiry 或 strike 范围后重试。",
+            )
+        )
+    activity.append(
+        ActivityEvent(
+            code="SURFACE_NORMALIZED",
+            stage="normalization",
+            message=f"已标准化 {len(snapshots)} 个日期的完整 volatility surface。",
+            affectedObservations=len(snapshots),
+        )
     )
     return SurfaceResponse(
         requestId=request_id,
-        summary=SurfaceQualitySummary(
-            snapshotCount=len(public_snapshots),
-            pointCount=total_points,
-            effectivePointCount=effective_points,
-        ),
-        source=source,
-        requestAudit=request_audit,
-        snapshots=public_snapshots,
-        dataQuality=_surface_quality(snapshots),
-        methodology=_methodology(request),
+        snapshots=api_snapshots,
+        source=_source_info(client, request, [fetch_result], request.start_date),
+        dataQuality=quality,
         activity=activity,
-        disclosures=DISCLOSURES,
-    )
-
-
-def _surface_snapshot(snapshot: StandardSurfaceObservation) -> SurfaceApiSnapshot:
-    points = [
-        SurfaceApiPoint(
-            maturity=point.maturity,
-            strike=point.strike,
-            forward=point.forward,
-            discount=point.discount,
-            rawImpliedVol=_finite_or_none(point.raw_implied_vol),
-            impliedVol=_finite_or_none(point.implied_vol),
-            qualityFlags=point.quality_flags,
-        )
-        for point in snapshot.points
-    ]
-    return SurfaceApiSnapshot(
-        date=snapshot.date,
-        instrument=snapshot.instrument,
-        spot=snapshot.spot,
-        points=points,
-    )
-
-
-def _surface_quality(snapshots: list[StandardSurfaceObservation]):
-    flags = Counter(
-        flag
-        for snapshot in snapshots
-        for point in snapshot.points
-        for flag in point.quality_flags
-    )
-    issue_count = sum(flags.values())
-    if issue_count == 0:
-        return build_quality_contract([])
-
-    issues = []
-    for flag, count in flags.most_common():
-        severity = "warning"
-        if flag in _INVALID_IV_FLAGS:
-            severity = "error"
-        issues.append(
-            DataIssue(
-                code=flag,
-                severity=severity,
-                count=count,
-                message=_quality_message(flag),
-            )
-        )
-    return build_quality_contract([], issues=issues)
-
-
-def _quality_message(flag: str) -> str:
-    messages = {
-        QualityFlag.INVALID_IV_ZERO.value: "IV 为 0，保留 raw 值但 effective IV 置空。",
-        QualityFlag.INVALID_IV_NEGATIVE.value: "IV 为负，保留 raw 值但 effective IV 置空。",
-        QualityFlag.INVALID_IV_NON_FINITE.value: "IV 非有限值，effective IV 置空。",
-        QualityFlag.SUSPICIOUS_IV_GT_500_PCT.value: "IV 大于 500%，保留并标记 suspicious。",
-    }
-    return messages.get(flag, flag)
-
-
-def _finite_or_none(value):
-    if value is None:
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) else None
-
-
-def _series_points(series) -> list[SeriesPoint]:
-    return [
-        SeriesPoint(
-            date=point.date,
-            spot=point.spot,
-            iv=point.iv,
-            rv=point.rv,
-            spread=point.spread,
-            qualityFlags=point.quality_flags,
-        )
-        for point in series
-    ]
-
-
-def _source_info(execution: CompareExecution) -> SourceInfo:
-    source = execution.load.source
-    return SourceInfo(
-        provider=source.provider,
-        endpoint=source.endpoint,
-        retrievedAt=source.retrieved_at,
-        fromCache=source.from_cache,
-        requestCount=source.request_count,
-    )
-
-
-def _request_audit(execution: CompareExecution) -> RequestAudit:
-    request = execution.request
-    wire = serialize_volatility_request(request)
-    upstream = [
-        UpstreamRequestAudit(
-            endpoint=item.endpoint,
-            body=item.body,
-            retrievedAt=item.retrieved_at,
-            requestId=item.request_id,
-            correlationId=item.correlation_id,
-            fromCache=item.from_cache,
-        )
-        for item in execution.load.upstream_requests
-    ]
-    return RequestAudit(
-        requestedCoordinate=request.requested_coordinate,
-        effectiveFetchRange=execution.load.effective_fetch_range,
-        source=execution.load.source.provider,
-        provider=execution.load.source.provider,
-        api=execution.load.source.endpoint,
-        retrievedAt=execution.load.source.retrieved_at,
-        requestId=execution.request_id,
-        wireRequest=wire,
-        upstreamRequests=upstream,
-    )
-
-
-def _methodology(request: VolatilityRequest) -> Methodology:
-    return Methodology(
-        ivRule="effective IV is the provider value after invalid raw values are nulled; no fitting or smoothing",
-        rvRule="close-to-close log-return realized volatility, ddof=1, annualized by sqrt(252)",
-        missingDataRule="missing observations stay missing; no nearest-coordinate substitution",
-        forwardRvRule="forward RV requires future sessions beyond the display end date",
-        largeSurfaceWarning=LARGE_SURFACE_POINT_WARNING,
-        requestRule=request.requested_coordinate,
+        disclosures=list(DISCLOSURES),
     )
