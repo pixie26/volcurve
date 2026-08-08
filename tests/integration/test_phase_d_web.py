@@ -740,3 +740,15 @@ def test_bulk_maturity_allows_fixed_date_but_only_blocks_contract_invalid_combin
     # A source indicator being Listed is not itself an invalid target conversion. Listed is
     # simply not offered as a shared bulk target because its universe is discovered per date.
     assert "个指标使用 Listed expiry" not in bulk_logic
+
+
+def test_stale_archive_is_prominent_in_time_series_ui():
+    with TestClient(app) as client:
+        javascript = client.get("/static/compare-builder.js").text
+        css = client.get("/static/styles.css").text
+
+    assert "STALE DATA — 最新 Cortex 刷新失败" in javascript
+    assert 'warning.classList.toggle("is-stale", stale.length > 0)' in javascript
+    assert ".warning-banner.is-stale" in css
+    assert "Oldest contributing fetch" in javascript
+    assert "Refresh failure" in javascript

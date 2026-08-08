@@ -10,7 +10,7 @@
 - **Release TODO：项目完善并进入正式团队交付前，将 GitHub repository 切换为 private。** 这是一项明确的发布清单要求，不替代 secret/raw-data 的独立安全边界。
 - Uvicorn 固定 `--workers 1`。当前进程内 singleton client、连接状态 beacon、本地 DuckDB/cache 与 process-wide upstream limiter 都按单 worker 设计。
 - `.env`、token、`data/` 不得复制进 image。凭据由运行环境或 secret manager 注入。
-- `/app/data` 必须挂载持久卷；否则容器重建会丢失 raw 权威源与 catalog。
+- `/app/data` 必须挂载持久卷；否则容器重建会丢失 request cache、catalog 与 `history.duckdb` 历史点库/修订记录。
 - 当前真实 Cortex HTTP attempts 进程内最多 4 个同时执行；不要通过增加 worker 绕过该限制。
 
 ## 本机启动

@@ -339,6 +339,7 @@ body.is-resizing-column { cursor: col-resize; user-select: none; }
 .secondary-button { padding: 8px 12px; color: var(--green-dark); background: var(--panel); border: 1px solid #aac6b6; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 750; }
 .warning-banner, .coordinate-hint { margin: 0 0 15px; padding: 13px 15px; border-radius: 10px; font-size: 12px; line-height: 1.55; }
 .warning-banner { color: #77400e; background: var(--orange-soft); border: 1px solid #edc494; }
+.warning-banner.is-stale { color: #8f1f18; background: #fde8e6; border-color: #e7a8a2; font-weight: 750; }
 .coordinate-hint { color: #225a43; background: #e5f4eb; border: 1px solid #b9dcc8; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-bottom: 16px; }
 .summary-card { min-height: 105px; padding: 17px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }

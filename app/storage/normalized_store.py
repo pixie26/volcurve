@@ -92,6 +92,14 @@ class NormalizedStore:
         self._atomic_parquet(pd.DataFrame(instruments), path)
         return path
 
+    def delete_request(self, request_hash: str) -> None:
+        for directory in ("implied_vol", "implied_vol_surface"):
+            path = self._dir / directory / f"{request_hash}.parquet"
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
     @staticmethod
     def _atomic_parquet(frame: pd.DataFrame, path: Path) -> None:
         fd, temp_name = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=".tmp", dir=path.parent)

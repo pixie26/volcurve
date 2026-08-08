@@ -22,6 +22,7 @@ def _bare_client(tmp_path, *, mode="live"):
     client._catalog = Catalog(tmp_path / "catalog.duckdb")
     client._raw = RawStore(tmp_path / "raw")
     client._normalized = NormalizedStore(tmp_path / "normalized")
+    client._history = None
     client._inflight = {}
     client._inflight_guard = threading.Lock()
     return client

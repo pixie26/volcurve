@@ -49,6 +49,13 @@ class RawStore:
     def exists(self, endpoint: str, request_hash: str) -> bool:
         return self._path(endpoint, request_hash).exists()
 
+    def delete(self, endpoint: str, request_hash: str) -> None:
+        path = self._path(endpoint, request_hash)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
     @staticmethod
     def payload_hash(payload: object) -> str:
         blob = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")

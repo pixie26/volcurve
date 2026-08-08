@@ -2842,9 +2842,13 @@
         ["Display range", displayRange],
         ["Effective fetch range", fetchRange],
         ["Source mode", String(data.source.cacheStatus || "unknown").toUpperCase()],
+        ["Data status", data.source.isStale ? "STALE — latest refresh failed" : "FRESH / locally confirmed"],
         ["Actual upstream calls", String(sentCount)],
         ["Provider", `${data.source.provider} · API ${data.source.apiVersion}`],
-        ["Retrieved at", data.source.retrievedAt],
+        ["Oldest contributing fetch", data.source.oldestRetrievedAt || data.source.retrievedAt],
+        ["Newest contributing fetch", data.source.newestRetrievedAt || data.source.retrievedAt],
+        ["Refresh attempted", data.source.refreshAttemptedAt || "—"],
+        ["Refresh failure", data.source.staleReason || "—"],
         ["Request ID", data.requestId],
       ])}
       ${fetchRange !== displayRange ? '<p class="request-range-note">后台为 RV warm-up / forward-tail 覆盖扩大了取数日期；展示日期范围没有改变。</p>' : ""}
@@ -3550,13 +3554,22 @@
 
   function renderIndicatorWarnings(active) {
     const errors = active.filter((item) => item.status === "error");
+    const stale = active.filter((item) => item.response?.source?.isStale);
     const invalid = active
       .filter((item) => item.type === "implied_vol")
       .reduce((count, item) => count + (item.response?.dataQuality?.invalidIvCount || 0), 0);
     const warning = $("timeseriesWarning");
     const messages = [];
+    if (stale.length) {
+      const sources = stale.map((item) => {
+        const source = item.response.source;
+        return `${indicatorLabel(item)}：${source.newestRetrievedAt || source.retrievedAt}`;
+      });
+      messages.push(`STALE DATA — 最新 Cortex 刷新失败，正在显示本地历史数据。最近成功获取：${sources.join("；")}`);
+    }
     if (errors.length) messages.push(`${errors.length} 个激活指标加载失败；查看左侧指标卡的原始错误。`);
     if (invalid) messages.push(`${invalid} 个非正/无效 IV 点保留 raw value，但图中为空且不连接。`);
+    warning.classList.toggle("is-stale", stale.length > 0);
     if (!messages.length) {
       warning.classList.add("is-hidden");
       warning.textContent = "";
