@@ -125,8 +125,8 @@ test("1D / 5D / 20D changes use usable observation lags", () => {
   points[20].value = null;
   const stats = summarizeSeries(points);
   assert.equal(stats.change1, 1);
-  assert.equal(stats.change5, 5);
-  assert.equal(stats.change20, 21); // one missing observation was excluded rather than zero-filled
+  assert.equal(stats.change5, 6); // five usable observations back crosses the missing source point
+  assert.equal(stats.change20, 21); // missing observation is excluded rather than zero-filled
 });
 
 test("most recent repeated extreme defines extrema dates and sessions-since", () => {
