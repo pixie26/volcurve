@@ -95,12 +95,13 @@ def test_upstream_slot_is_released_when_one_attempt_raises(monkeypatch):
     semaphore.release()
 
 
-def test_retry_releases_upstream_slot_between_attempts(monkeypatch):
-    """A 429 retry re-enters the queue instead of keeping a permit through backoff."""
+def test_retry_releases_upstream_slot_during_backoff(monkeypatch):
+    """A 429 retry re-enters the queue instead of sleeping while holding a permit."""
     semaphore = threading.BoundedSemaphore(1)
     monkeypatch.setattr(client_module, "_UPSTREAM_SEMAPHORE", semaphore)
     client = _bare_client()
     calls = 0
+    backoff_saw_free_slot = False
 
     def rate_limit_then_succeed(*_args, **_kwargs):
         nonlocal calls
@@ -111,7 +112,14 @@ def test_retry_releases_upstream_slot_between_attempts(monkeypatch):
             raise error
         return []
 
+    def inspect_backoff(_seconds: float) -> None:
+        nonlocal backoff_saw_free_slot
+        backoff_saw_free_slot = semaphore.acquire(blocking=False)
+        if backoff_saw_free_slot:
+            semaphore.release()
+
     client._single_request = rate_limit_then_succeed
+    monkeypatch.setattr(client_module.time, "sleep", inspect_backoff)
     result = client._request_with_retry(
         "GET",
         "/v1/instruments",
@@ -120,5 +128,6 @@ def test_retry_releases_upstream_slot_between_attempts(monkeypatch):
 
     assert result == []
     assert calls == 2
+    assert backoff_saw_free_slot
     assert semaphore.acquire(blocking=False)
     semaphore.release()
