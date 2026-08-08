@@ -101,6 +101,7 @@ def test_compare_is_an_indicator_builder_with_internal_bnp_wire_defaults():
     assert "data-indicator-delete" in javascript
     assert "connectgaps: false" in javascript
 
+
 def test_compare_listed_coordinates_are_direct_and_exact():
     with TestClient(app) as client:
         javascript = client.get("/static/compare-builder.js").text
@@ -111,6 +112,7 @@ def test_compare_listed_coordinates_are_direct_and_exact():
     assert 'maturity_rule: "listed"' in javascript
     assert 'strike_rule: "fixed"' in javascript
     assert "可直接输入任意正数，也可从下拉建议选择" in javascript
+
 
 def test_compare_non_iv_carrier_assumptions_are_visible():
     with TestClient(app) as client:
@@ -157,6 +159,7 @@ def test_compare_supports_eight_synchronized_charts_and_per_indicator_instrument
     assert 'hovermode: "x unified"' in javascript
     assert "Plotly.Fx.hover" in javascript
     assert "syncXZoom" in javascript
+
 
 def test_hovering_one_chart_reads_out_every_chart_for_that_date():
     with TestClient(app) as client:
@@ -207,6 +210,7 @@ def test_query_rail_uses_unnumbered_date_underlying_indicator_groups():
     assert 'id="slidingWindow"' in html
     assert "52d, 2w, 3m, 3y" in html
     assert "renderScopeFields" in javascript
+
 
 def test_instrument_search_results_are_clickable_not_a_datalist():
     with TestClient(app) as client:
@@ -328,8 +332,15 @@ def test_boards_reload_saved_indicator_sets_with_fresh_data():
         html = client.get("/").text
         javascript = client.get("/static/compare-builder.js").text
 
-    for element in ("boardSelect", "boardName", "saveBoardAsButton", "updateBoardButton",
-                    "deleteBoardButton", "loadBoardButton", "activeBoardLabel"):
+    for element in (
+        "boardSelect",
+        "boardName",
+        "saveBoardAsButton",
+        "updateBoardButton",
+        "deleteBoardButton",
+        "loadBoardButton",
+        "activeBoardLabel",
+    ):
         assert f'id="{element}"' in html
     assert 'BOARD_STORAGE_KEY = "volcurve.compare.boards.v1"' in javascript
 
@@ -504,11 +515,33 @@ def test_statistics_columns_are_configurable_and_cover_the_full_metric_set():
     assert 'id="statsColumnsResetButton"' in html
     assert 'STATS_STORAGE_KEY = "volcurve.compare.statscolumns.v1"' in javascript
     columns = javascript.split("const STAT_COLUMNS = [", 1)[1].split("];", 1)[0]
-    for metric in ("zScore", "change5", "change20", "change60", "iqr", "maxDate", "minDate",
-                   "largestGain", "largestDrop", "skewness", "kurtosis", "mean20", "mean60",
-                   "autocorrelation", "autocorrelation5", "autocorrelation20", "percentile",
-                   "range", "p25", "p75", "vsMean20", "meanAbsChange", "positiveShare",
-                   "sessionsSinceMax", "sessionsSinceMin"):
+    for metric in (
+        "zScore",
+        "change5",
+        "change20",
+        "change60",
+        "iqr",
+        "maxDate",
+        "minDate",
+        "largestGain",
+        "largestDrop",
+        "skewness",
+        "kurtosis",
+        "mean20",
+        "mean60",
+        "autocorrelation",
+        "autocorrelation5",
+        "autocorrelation20",
+        "percentile",
+        "range",
+        "p25",
+        "p75",
+        "vsMean20",
+        "meanAbsChange",
+        "positiveShare",
+        "sessionsSinceMax",
+        "sessionsSinceMin",
+    ):
         assert f'id: "{metric}"' in columns
 
     restore = javascript.split("function restoreStatsColumns", 1)[1].split("function persistStatsColumns", 1)[0]
@@ -516,14 +549,38 @@ def test_statistics_columns_are_configurable_and_cover_the_full_metric_set():
     assert "if (!seen.has(column.id)) ordered.push({ id: column.id, visible: column.defaultVisible !== false })" in restore
 
     # Longer-window and secondary statistics default to hidden, one click away.
-    hidden_by_default = ("change60", "mean60", "vsMean20", "p25", "p75", "sessionsSinceMax",
-                          "sessionsSinceMin", "meanAbsChange", "positiveShare",
-                          "autocorrelation5", "autocorrelation20")
+    hidden_by_default = (
+        "change60",
+        "mean60",
+        "vsMean20",
+        "p25",
+        "p75",
+        "sessionsSinceMax",
+        "sessionsSinceMin",
+        "meanAbsChange",
+        "positiveShare",
+        "autocorrelation5",
+        "autocorrelation20",
+    )
     for metric in hidden_by_default:
-        assert f'id: "{metric}", label:' in columns and "defaultVisible: false" in columns.split(f'id: "{metric}",', 1)[1].split("\n", 1)[0]
+        assert f'id: "{metric}", label:' in columns and "defaultVisible: false" in columns.split(
+            f'id: "{metric}",', 1
+        )[1].split("\n", 1)[0]
     # The everyday statistics stay on by default.
-    for metric in ("change1", "change5", "change20", "mean", "mean20", "median",
-                   "stdDev", "percentile", "zScore", "skewness", "kurtosis", "autocorrelation"):
+    for metric in (
+        "change1",
+        "change5",
+        "change20",
+        "mean",
+        "mean20",
+        "median",
+        "stdDev",
+        "percentile",
+        "zScore",
+        "skewness",
+        "kurtosis",
+        "autocorrelation",
+    ):
         line = columns.split(f'id: "{metric}",', 1)[1].split("\n", 1)[0]
         assert "defaultVisible: false" not in line
 
@@ -610,7 +667,7 @@ def test_copying_a_combination_to_another_underlying_rewires_it_to_the_copies():
     assert 'copy.config.alias = ""' in copy
     assert 'if (copy.type !== "derived") copy.config.instrumentCode = code;' in copy
 
-    move = javascript.split("function bulkMove", 1)[1].split("function bulkCopy", 1)[0]
+    move = javascript.split("function bulkMove(repointable, code)", 1)[1].split("function bulkCopy", 1)[0]
     # A move keeps the card's own name but says so, since the name may no longer fit.
     assert "保留了原有别名" in move
     assert "item.response = null" in move
@@ -624,7 +681,7 @@ def test_the_page_can_never_be_assembled_from_mismatched_asset_versions():
 
     # The static mount hands out ETag/Last-Modified, so a browser will happily keep a script
     # cached. Stamping the URL makes each version a distinct resource instead.
-    stamped = re.findall(r'/static/(app\.js|compare-builder\.js|styles\.css)\?v=([^"]+)', html)
+    stamped = re.findall(r'/static/(app\.js|compare-builder\.js|styles\.css)\?v=([^\"]+)', html)
     assert {name for name, _ in stamped} == {"app.js", "compare-builder.js", "styles.css"}
     assert len({version for _, version in stamped}) == 1, "all assets must carry one version"
     assert "{{ASSET_VERSION}}" not in html, "the placeholder must be substituted"
