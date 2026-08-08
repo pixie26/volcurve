@@ -34,9 +34,14 @@ app = ["web/*.html", "web/*.css", "web/*.js", "web/vendor/*.js", "web/vendor/*.t
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+extend-exclude = ["docs/bnp/raw/python-src"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/api/cortex_playground.py" = ["B008"]
+"app/api/presenters.py" = ["I001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
