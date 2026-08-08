@@ -57,7 +57,14 @@ def _asset_version() -> str:
     silently never runs. Stamping the URLs makes each version a distinct resource.
     """
     newest = 0.0
-    for name in ("index.html", "app.js", "compare-builder.js", "cortex-playground.js", "styles.css"):
+    for name in (
+        "index.html",
+        "app.js",
+        "compare-core.js",
+        "compare-builder.js",
+        "cortex-playground.js",
+        "styles.css",
+    ):
         path = WEB_ROOT / name
         if path.exists():
             newest = max(newest, path.stat().st_mtime)
