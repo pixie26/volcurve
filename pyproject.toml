@@ -1,6 +1,6 @@
 [project]
 name = "cortex-vol-analytics"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Internal volatility analytics web tool powered by BNP Cortex DataHub API"
 requires-python = ">=3.11"
 dependencies = [
@@ -31,6 +31,9 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 app = ["web/*.html", "web/*.css", "web/*.js", "web/vendor/*.js", "web/vendor/*.txt"]
+
+[tool.setuptools.dynamic]
+version = {attr = "app.version.__version__"}
 
 [tool.ruff]
 target-version = "py311"
