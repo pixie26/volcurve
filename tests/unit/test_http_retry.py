@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 
@@ -40,6 +41,30 @@ def test_upstream_error_whitelists_message_code_and_suggested_action():
     assert error.upstream_suggested_action == "Try another observation date or coordinate."
     assert not hasattr(error, "upstream_payload")
     assert "secretField" not in error.__dict__
+
+
+def test_upstream_error_log_never_records_unwhitelisted_response_body(caplog):
+    client = object.__new__(CortexClient)
+    response = httpx.Response(
+        400,
+        json={
+            "code": "BNP_BAD_COORDINATE",
+            "message": "Requested coordinate is unavailable.",
+            "suggestedAction": "Try another coordinate.",
+            "secretField": "RAW_BODY_SECRET_MARKER",
+        },
+    )
+
+    with caplog.at_level(logging.WARNING, logger="cortex.client"):
+        with pytest.raises(CortexError):
+            client._handle_response(response, "log-boundary")
+
+    log_text = caplog.text
+    assert "BNP_BAD_COORDINATE" in log_text
+    assert "Requested coordinate is unavailable." in log_text
+    assert "RAW_BODY_SECRET_MARKER" not in log_text
+    assert "secretField" not in log_text
+    assert "suggestedAction" not in log_text
 
 
 def test_upstream_non_json_error_uses_normalized_error_without_upstream_fields():
