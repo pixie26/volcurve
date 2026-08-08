@@ -1,9 +1,9 @@
 # Time Series Indicator Builder — 当前产品契约
 
 初版日期：2026-08-07  
-当前修订：2026-08-08
+当前修订：2026-08-09
 
-> 本文只描述**当前用户可见产品语义**。Phase F 早期的 5-chart、手输 Listed expiry、Load/Apply 等设计已废弃；cache/storage 细节只保留直接影响用户体验的部分，完整工程状态见 [`optimization_review_zh.md`](optimization_review_zh.md)。
+> 本文只描述**当前用户可见产品语义**。Phase F 早期的 5-chart、手输 Listed expiry、Load/Apply 等设计已废弃；工程实现、测试边界和 roadmap 分别见 [`frontend_testing_zh.md`](frontend_testing_zh.md) 与 [`optimization_review_zh.md`](optimization_review_zh.md)。
 
 ## 1. 工作台模型
 
@@ -14,7 +14,7 @@ Time Series 以 observation date 为 X 轴：
 - 每个 indicator 独立保存 instrument、market coordinate、chart 归属和 enabled state；
 - indicator 可编辑、复制、移动、启用/停用、删除；
 - 一个 chart 可显示多个 indicator，不同 chart/indicator 可以使用不同 instrument；
-- vol 类数据使用左轴，spot/forward 使用右轴；
+- vol 类数据使用左轴，spot/forward/ratio/mixed-unit 使用右轴；
 - 任一 chart hover 时，其他 chart 只显示同一个**精确 observation date** 上实际存在的值；
 - X zoom / reset 在 chart 间同步，Y axis 独立；
 - board 保存布局和查询配置，重新打开后重新取数，不把旧 market response 当作当前数据保存。
@@ -95,7 +95,9 @@ Cortex implied-volatility response 同时携带 spot 与 forward curve；项目�
 
 长期 archive/cache 具体语义见 [`optimization_review_zh.md`](optimization_review_zh.md)；licensed data 生命周期见 [`data_retention_policy_zh.md`](data_retention_policy_zh.md)。
 
-## 7. Bulk Maturity
+## 7. Bulk Maturity / Bulk Underlying
+
+Bulk Underlying 通过 instrument catalogue 搜索并选择目标标的，不要求用户只能手输 canonical code。
 
 Bulk Maturity 有意支持：
 
@@ -109,9 +111,32 @@ Bulk Maturity 有意支持：
 - Fixed date 是精确 request coordinate，不保证上游存在；
 - 前端只阻止已知 contract-invalid 组合，例如 Delta + Fixed、Absolute strike + Sliding；
 - Listed expiry 不作为统一 bulk target，因为 expiry universe 随 instrument × observation date 变化，需要逐项 discovery；
-- 从 Listed source indicator 批量改成 Sliding/Fixed 可以执行，只要目标组合本身合法。
+- 从 Listed source indicator 批量改成 Sliding/Fixed 可以执行，只要目标组合本身合法；
+- bulk copy 若包含 derived indicator，其复制品必须重新指向复制出的 operands，而不能偷偷继续引用原始 operands。
 
-## 8. 用户验收重点
+## 8. Statistics 与 Derived 指标语义
+
+Time Series statistics 面向当前所选日期范围内的**有效 observation**：
+
+- null / missing / non-finite 不按 0 处理；
+- 输入顺序不作为日期顺序，统计前按 observation date 排序；
+- 1D / 5D / 20D / 60D change 的 lag 按**有效 observation 数**计算；
+- sample standard deviation 使用 `ddof=1` 语义；
+- small-N 下数学上不成立的 skew / kurtosis / autocorrelation 保持 null；
+- percentile / z-score 使用当前所选有效历史；
+- repeated max/min 的 `maxDate/minDate` 与 `sessionsSinceMax/Min` 使用**最近一次**达到该极值的 observation。
+
+Derived indicator 支持 A+B / A−B / A×B / A÷B：
+
+- 只在两个 operands 都存在的共同 observation date 上计算；
+- 任一 side 为 missing/null 时结果保持 null；
+- divide-by-zero 保持 null；
+- 不插值、不前向填充、不选最近日期；
+- derived 计算发生在浏览器，不发送新的 market-data request。
+
+上述用户可见统计由 production `compare-core.js` 统一实现并通过 Node execution tests 固化；完整工程边界见 [`frontend_testing_zh.md`](frontend_testing_zh.md)。
+
+## 9. 用户验收重点
 
 1. 1–8 charts 的增加、删除、移动、缩放是否自然；
 2. Sliding / Listed 的选择顺序是否直观；
@@ -119,14 +144,35 @@ Bulk Maturity 有意支持：
 4. Listed + absolute strike suggestions 与自由输入是否同时可用；
 5. 不存在的 date/expiry/strike 是否保持 `NO_DATA` 而非选最近值；
 6. indicator 的独立 instrument、编辑/复制/启停是否符合研究习惯；
-7. cross-chart hover 是否严格同日；
-8. X zoom 同步、Y axis 独立、自定义统计和 board restore 是否稳定；
-9. Request Audit / Methodology / Quality / Activity 是否对应当前 indicator；
-10. stale fallback 是否足够醒目且 provenance 完整。
+7. Bulk Underlying 搜索、move/copy 与 derived rewiring 是否符合预期；
+8. Bulk Fixed 是否发送精确 Fixed coordinate，而不是最近期限替代；
+9. cross-chart hover 是否严格同日；
+10. X zoom 同步、Y axis 独立、自定义统计和 board restore 是否稳定；
+11. statistics 的 missing/small-N/repeated-extreme 语义是否稳定；
+12. Request Audit / Methodology / Quality / Activity 是否对应当前 indicator；
+13. stale fallback 是否足够醒目且 provenance 完整。
 
-## 9. 验证原则
+## 10. 验证原则
 
-每个 PR 与 master push 的权威自动 Gate 是 GitHub Actions：install、compile、Ruff、pytest。本文不维护固定的 test-count 数字。
+每个 PR 与每次 push 到 `master` 的权威自动 Gate 包含：
+
+```text
+Python compile
+→ Ruff
+→ pytest
+→ Node unit / architecture tests
+→ Playwright Chromium smoke
+→ secret scan
+→ git diff --check
+```
+
+职责上：
+
+- Node 负责 production pure-core 数值、derived arithmetic、signature 与 frontend architecture；
+- Playwright 负责真实浏览器 boot、interaction、Plotly/statistics render、request serialization 与 runtime error；
+- Python Web tests 只保留适合静态检查的 product/asset/security/disclosure contracts。
+
+本文不维护固定 test-count 数字，以最新 green GitHub Actions workflow 为准。
 
 任何 UX 改动都不得改变以下 frozen rules：
 
@@ -134,4 +180,6 @@ Bulk Maturity 有意支持：
 - raw/effective IV 边界；
 - 精确 coordinate 原则；
 - invalid IV exclusion；
-- 不做 silent nearest-coordinate replacement。
+- 不做 silent nearest-coordinate replacement；
+- derived common-date / missing / divide-zero semantics；
+- repeated extrema 使用最近一次 touch 的统计语义。
