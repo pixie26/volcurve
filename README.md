@@ -9,7 +9,9 @@
 - **httpx** — Cortex DataHub 客户端、认证、重试与并发控制
 - **pandas + PyArrow + DuckDB** — analytics、request cache、历史点库与 revision metadata
 - **Plotly** — 离线 vendor bundle，不走 CDN
-- **pytest + Ruff + GitHub Actions** — 自动质量 Gate
+- **Node.js + `node:test`** — 前端 pure-core 数值与架构执行测试
+- **Playwright + Chromium** — 真实浏览器行为 smoke tests
+- **pytest + Ruff + GitHub Actions** — 后端/API/工程质量 Gate
 
 ## 目录结构
 
@@ -18,19 +20,28 @@ app/
   clients/cortex/   # Cortex 认证、HTTP client、serializer/parser、错误处理
   domain/           # 请求、观测、响应等内部数据模型
   storage/          # raw/normalized request cache、catalog、historical point archive
-  analytics/        # RV、对齐、质量标记与统计
+  analytics/        # RV、后端 CompareSummary、质量标记与统计
   security/         # 日志脱敏
-  web/              # Time Series / Surface / Playground 前端
+  web/
+    compare-core.js       # Time Series canonical pure core
+    compare-workspace.js  # workspace / board / bulk / persistence
+    compare-request.js    # exact request / fetch / series resolution
+    compare-render.js     # DOM / Plotly / details / statistics rendering
+    compare-builder.js    # thin bootstrap/controller
+    app.js                # Surface / shared page logic
   config.py
   version.py        # 应用/package 版本唯一来源
 scripts/            # live probe、审计与验证脚本
-tests/fixtures/     # 脱敏离线响应样本
+tests/
+  js/               # production pure-core / architecture execution tests
+  browser/          # Playwright Chromium runtime tests
+  fixtures/         # 脱敏离线响应样本
 schemas/            # Cortex OpenAPI 规范
 docs/bnp/           # 离线 BNP 官方文档与 SDK 源码
 data/               # gitignored：raw、normalized、catalog.duckdb、history.duckdb
 ```
 
-文档入口见 [`docs/README.md`](docs/README.md)。
+文档入口见 [`docs/README.md`](docs/README.md)。前端 correctness / module boundary 见 [`docs/frontend_testing_zh.md`](docs/frontend_testing_zh.md)。
 
 ## 配置与启动
 
@@ -64,7 +75,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 - **Sliding tenor**：例如 `1M`、`3M`；
 - **Listed expiry**：按 instrument + observation date 自动 discovery 实际 listed expiries，再选择精确 expiry。
 
-`fixed` maturity 仍保留在 backend/OpenAPI/legacy 兼容层中，但不是主 indicator builder 的普通入口，也不代表任意日历日期存在插值点。
+`fixed` maturity 仍保留在 backend/OpenAPI/legacy 兼容层中，并用于 Bulk Maturity 等明确场景，但不是主 indicator builder 的普通入口，也不代表任意日历日期存在插值点。
 
 Strike 支持：
 
@@ -74,6 +85,19 @@ Strike 支持：
 - Absolute strike。Listed expiry + absolute strike 会按 observation date + expiry 自动 discovery 实际 strikes，同时允许自由输入；不存在的 strike/expiry 不会被替换成最近值。
 
 Time Series 最多支持 **8 个**上下排列坐标；每个 indicator 独立保存 instrument、坐标与启用状态。跨图 hover 只对齐同一个**精确 observation date**，不前填、不插值、不选择最近交易日。完整产品契约见 [`docs/phase_f_compare_indicator_builder_zh.md`](docs/phase_f_compare_indicator_builder_zh.md)。
+
+## 前端 correctness 与代码边界
+
+7.5 已关闭。Time Series 前端不再依赖“3000+ 行单体 JS + 人工验证”的模式：
+
+- `compare-core.js` 是用户可见 range statistics、derived arithmetic、coordinate/board signatures 的唯一前端实现；
+- Browser production 与 Node tests 直接执行同一份 production core，不存在源码 extraction seam；
+- repeated max/min 的日期与 `sessionsSinceMax/Min` 使用**最近一次**达到极值的 observation；
+- Python Web tests 只保留适合静态检查的 product/asset contracts；
+- Chromium Playwright 负责页面 boot、真实 interaction、request serialization 与 runtime error 检查；
+- architecture tests 防止 pure logic 重复和 `compare-builder.js` 重新长回单体文件。
+
+后端 `app/analytics/statistics.py` 仍被 `AnalyticsEngine.run_compare` / `CompareSummary` API contract 使用，因此保留；它与 Time Series browser-derived statistics 的职责边界已经明确，而不是为了“单一语言”强行删除真实 backend consumer。
 
 ## 数据与 cache 语义
 
@@ -103,20 +127,33 @@ Absolute/fixed strike、大 listed-strike universe、非精确 range/surface 不
 - raw IV 保留上游值；非正/非有限 IV 的 effective value 置空并从 analytics 排除；极端正 IV 保留但标记 suspicious；
 - 所有 maturity/strike 都坚持精确坐标原则，不做 silent nearest-coordinate replacement。
 
-## 当前状态（2026-08-08）
+## 当前状态（2026-08-09）
 
-- ✅ Phase 0–E：认证、严格请求契约、parser、IV/RV analytics、API、Web、live 数值验证与基础部署 Gate 已完成；
-- ✅ Phase F Time Series：8-chart 工作台、独立 instrument、同日 hover、同步 X zoom、编辑/复制/启停、统计与 board persistence 已完成；
-- ✅ Listed expiry / absolute strike discovery 已改为 observation-date 驱动；
-- ✅ Stabilization Step 1–6：测试清理、GitHub Actions、empty surface `NO_DATA`、upstream concurrency、版本/文档校正、Bulk Fixed 与日志边界已完成；
-- ✅ Step 7：8 小时 request cache、revision-aware historical archive、cache compaction 与显式 stale fallback 已完成；
-- 🚧 下一优先级：历史点库的迁移/审计/备份恢复工具，然后再做 persistent HTTP connection lifecycle 优化。
+- ✅ Phase 0–E：认证、严格请求契约、parser、IV/RV analytics、API、Web、live 数值验证与基础部署 Gate；
+- ✅ Phase F Time Series：8-chart 工作台、独立 instrument、同日 hover、同步 X zoom、编辑/复制/启停、统计与 board persistence；
+- ✅ Listed expiry / absolute strike discovery：observation-date 驱动，并有异步 race guard；
+- ✅ Stabilization Step 1–7：测试/CI、`NO_DATA`、upstream concurrency、版本/文档、Bulk Fixed、8h cache、revision-aware archive、compaction、stale fallback；
+- ✅ Frontend 7.5 A–G：pure core、数值 execution tests、Playwright、去伪行为测试、CI enforcement、statistics ownership audit、模块化拆分；
+- 🚧 **下一优先级：Step 8 Historical Archive Operations** — migration / integrity audit / coverage & revision inspection / backup-restore verification；
+- ⏭️ 之后：persistent Cortex HTTP client lifecycle，再完成 deployment release gate。
 
 当前状态与 roadmap 见 [`docs/optimization_review_zh.md`](docs/optimization_review_zh.md)。Phase A–E 的旧 acceptance 文档保留为**历史验收证据**，不作为当前产品说明。
 
 ## CI、版本与安全
 
-每个 PR、每次 push 到 `master` 都由 `.github/workflows/ci.yml` 执行 install、compile、Ruff 与 pytest。不要在长期文档里维护固定测试数量；以最新 green workflow 为准。
+每个 PR、每次 push 到 `master` 的强制 CI 链路为：
+
+```text
+Python compile
+→ Ruff
+→ pytest
+→ Node unit / architecture tests
+→ Playwright Chromium smoke
+→ secret scan
+→ git diff --check
+```
+
+不要在长期文档里维护固定测试数量；以最新 green workflow 为准。真实 licensed `data/raw/` 不存在于 GitHub runner，因此生产持久卷上的 raw/history audit 与 restore drill 仍属于 deployment/operations Gate，不能用空 CI runner 伪造 green evidence。
 
 应用/package 当前版本为 **0.4.0**，唯一版本常量在 `app/version.py`。
 
