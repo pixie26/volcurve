@@ -24,6 +24,7 @@ def test_web_shell_and_offline_assets_are_served() -> None:
     with TestClient(app) as client:
         page = client.get("/")
         app_js = client.get("/static/app.js")
+        compare_core = client.get("/static/compare-core.js")
         compare_js = client.get("/static/compare-builder.js")
         stylesheet = client.get("/static/styles.css")
         plotly = client.get("/static/vendor/plotly-5.24.1.min.js")
@@ -31,13 +32,16 @@ def test_web_shell_and_offline_assets_are_served() -> None:
     html = page.text
     assert page.status_code == 200
     assert app_js.status_code == 200
+    assert compare_core.status_code == 200
     assert compare_js.status_code == 200
     assert stylesheet.status_code == 200
     assert plotly.status_code == 200
     assert len(plotly.content) > 1_000_000
     assert 'lang="zh-Hans"' in html
     assert 'src="/static/vendor/plotly-5.24.1.min.js"' in html
+    assert 'src="/static/compare-core.js?v=' in html
     assert 'src="/static/compare-builder.js?v=' in html
+    assert html.index("/static/compare-core.js") < html.index("/static/compare-builder.js")
     assert "https://" not in html
 
 
