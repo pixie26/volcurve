@@ -1,6 +1,6 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
-import logging
 
 import httpx
 import pytest
