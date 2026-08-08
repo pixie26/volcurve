@@ -134,9 +134,14 @@
 
               <section id="bulkMaturityPanel" class="bulk-edit-panel is-hidden" aria-label="批量修改期限">
                 <div class="field-grid two bulk-maturity-mode">
-                  <label id="bulkSlidingMaturityField" class="field field-wide"><span>Target tenor</span><select id="bulkSlidingMaturity"></select></label>
+                  <label class="field"><span>期限类型</span><select id="bulkMaturityMode">
+                    <option value="sliding">Sliding tenor</option>
+                    <option value="fixed">Fixed date</option>
+                  </select></label>
+                  <label id="bulkSlidingMaturityField" class="field"><span>Target tenor</span><select id="bulkSlidingMaturity"></select></label>
                 </div>
-                <small id="bulkMaturityHelp">只支持批量改为 Sliding tenor；Spot 与 RV 没有 option tenor，不参与修改。Listed expiry 暂不支持批量修改。</small>
+                <label id="bulkFixedMaturityField" class="field is-hidden"><span>Target date</span><input id="bulkFixedMaturity" type="date" /></label>
+                <small id="bulkMaturityHelp">Sliding 与 Fixed date 都可批量修改；Fixed 按精确日期请求，可能返回 NO_DATA。Spot 与 RV 不参与；Listed expiry 暂不作为批量目标。</small>
                 <div class="bulk-action-stack">
                   <button id="bulkMaturityMoveButton" class="secondary-button bulk-primary-action" type="button" disabled>换成此期限</button>
                   <button id="bulkMaturityCopyButton" class="secondary-button" type="button" disabled>复制为此期限</button>
