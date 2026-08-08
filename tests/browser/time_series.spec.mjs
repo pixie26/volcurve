@@ -129,7 +129,7 @@ test("adding an indicator executes the real builder, chart and statistics paths"
   expect(errors).toEqual([]);
 });
 
-test("bulk Fixed maturity stays an exact request and does not crash the workspace", async ({ page }) => {
+test("bulk Fixed maturity persists exact state and the next refresh serializes it exactly", async ({ page }) => {
   const requests = [];
   await page.route("**/api/v1/vol/compare", async (route) => {
     const body = route.request().postDataJSON();
@@ -143,20 +143,25 @@ test("bulk Fixed maturity stays an exact request and does not crash the workspac
   const errors = await openWorkspace(page);
   await page.locator("#addIndicatorButton").click();
   await expect(page.locator("#indicatorCount")).toHaveText("1");
-  // The card appears before its async fetch/render finishes.  Wait for the statistics
-  // path to see the loaded response so the bulk action cannot race the first request.
   await expect(page.locator("#indicatorStatsCount")).toHaveText("1 series");
   await expect.poll(() => requests.length).toBe(1);
 
   await page.locator("#bulkModeButton").click();
-  const checkbox = page.locator("#savedIndicators [data-bulk-select]").first();
-  await checkbox.check();
+  await page.locator("#savedIndicators [data-bulk-select]").first().check();
   await page.locator("#bulkMaturityTab").click();
   await page.locator("#bulkMaturityMode").selectOption("fixed");
   await page.locator("#bulkFixedMaturity").fill("2026-12-30");
   await expect(page.locator("#bulkMaturityMoveButton")).toBeEnabled();
   await page.locator("#bulkMaturityMoveButton").click();
 
+  await expect(page.locator("#bulkNote")).toContainText("Fixed 2026-12-30");
+  const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem("volcurve.compare.workspace.v1")));
+  expect(persisted.items[0].config.maturityMode).toBe("fixed");
+  expect(persisted.items[0].config.expiry).toBe("2026-12-30");
+
+  // A refresh is the stable public action that promises re-fetch.  It must serialize the
+  // bulk-edited coordinate exactly; no nearest listed expiry substitution is allowed.
+  await page.locator("#refreshIndicatorsButton").click();
   await expect.poll(() => requests.length).toBeGreaterThanOrEqual(2);
   const latest = requests.at(-1).volatilityRequest;
   expect(latest.maturity_rule).toBe("fixed");
