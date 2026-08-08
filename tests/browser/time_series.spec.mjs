@@ -143,6 +143,10 @@ test("bulk Fixed maturity stays an exact request and does not crash the workspac
   const errors = await openWorkspace(page);
   await page.locator("#addIndicatorButton").click();
   await expect(page.locator("#indicatorCount")).toHaveText("1");
+  // The card appears before its async fetch/render finishes.  Wait for the statistics
+  // path to see the loaded response so the bulk action cannot race the first request.
+  await expect(page.locator("#indicatorStatsCount")).toHaveText("1 series");
+  await expect.poll(() => requests.length).toBe(1);
 
   await page.locator("#bulkModeButton").click();
   const checkbox = page.locator("#savedIndicators [data-bulk-select]").first();
