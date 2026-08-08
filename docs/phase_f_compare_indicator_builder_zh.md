@@ -1,107 +1,123 @@
-# Phase F1 Compare Indicator Builder 验收说明
+# Phase F Time Series Indicator Builder — 当前产品语义与验收说明
 
-日期：2026-08-07
+初版日期：2026-08-07  
+当前修订：2026-08-08
+
+> 本修订覆盖 2026-08-07 文档中的旧 UI 描述。后端保留的 legacy/OpenAPI 能力与当前主 UI 暴露的能力需要区分；不要再把旧文档里的 Fixed/Listed 手输、Load/Apply 或 5-chart 上限当成当前产品契约。
 
 ## 产品模型
 
-Compare 不再要求用户先构造一份同时包含 IV、RV、Spot 的大请求。页面现在是一个时序研究工作台：
+Time Series 是一个以 observation date 为 X 轴的时序研究工作台：
 
 1. 全局选择新 indicator 的默认 instrument、开始日期和结束日期；日期范围由所有图表共享；
-2. 主区域先显示一个以 observation date 为 X 轴的空白图，并可增加到最多 5 个上下排列的坐标；
+2. 主区域最多支持 **8 个**上下排列的坐标；
 3. 左侧逐个构建 indicator；
-4. 每个 indicator 独立保存 instrument 和所属坐标，保存后可移动、启用、停用或删除；
+4. 每个 indicator 独立保存 instrument、所属坐标和启用状态，保存后可编辑、复制、移动、启用/停用或删除；
 5. 每个坐标可显示多个 indicator，不同坐标及 indicator 可以使用不同标的；
-6. 波动率使用各坐标左轴，spot/forward 使用右轴；
-7. 任一图表 hover 时，其他图表显示同一天实际存在的所有 indicator 数值；
-8. 鼠标矩形框选执行 zoom；X 日期范围同步到其他图表，Y 范围仍由各图独立缩放。
+6. 波动率使用左轴，spot/forward 使用右轴；
+7. 任一图表 hover 时，其他图表显示同一个**精确 observation date** 上实际存在的 indicator 数值；
+8. 矩形 zoom 同步各图 X 日期范围，Y 轴仍独立缩放；
+9. board 可保存 indicator 配置、坐标布局和日期范围，载入后重新取数，不把旧行情持久化成当前响应。
 
-当前不设置 indicator 数量上限，图表坐标数量上限为 5。indicator 配置、独立 instrument、所属坐标、启用状态、图表数量、当前详情选择以及全局日期范围保存在当前浏览器的 `localStorage`；页面刷新或之后重新打开时会恢复，并重新请求所有激活项。旧版单图保存会迁移到坐标 1。该保存不跨浏览器/profile/origin，清除站点数据也会删除。行情响应、token、凭证和 raw payload 不写入浏览器持久化存储，避免把旧行情伪装成当前响应。
+indicator 配置、独立 instrument、所属坐标、启用状态、图表布局、当前详情选择以及全局日期范围保存在浏览器 `localStorage`。行情响应、token、凭证和 raw payload 不写入浏览器持久化存储。
 
 ## 多坐标交互规则
 
-- “添加坐标”逐个增加图表，达到 5 个后按钮禁用；没有自动合并或复用隐藏坐标。
-- 任意空坐标都可删除；若其中仍有 indicator，会拒绝删除并提示先在保存卡片中移动或删除。删除空坐标后，更高坐标编号自动顺移，indicator 配置同步更新且不会丢失。
-- 同日 hover 只显示各响应中精确存在的日期，不向前填充、不插值，也不选择最近交易日。
-- 矩形 zoom 同步 X 轴日期范围，因此不同标的仍保持时间对齐；Y 轴不跨图同步，避免把价格与波动率或数量级差异很大的标的压缩到不可读。
-- 双击恢复 X 轴自动范围时，同样同步到其他坐标。
-
-## 图表之外的完整结果
-
-新 Compare 只替换查询构建和总图，没有删除旧版结果信息。任一 indicator 加载完成后，可从保存卡片点击“查看详情”，或在结果区的“当前指标详情”下拉切换。每个 indicator 独立显示：
-
-- 完整逐日数据表，包括图中 selected value、spot、forward、raw/effective IV、RV 与 quality flags；
-- 请求 maturity/strike、Vol convention、Layout、取数载体、IV/RV 公式和数据源；
-- data quality 汇总与逐 flag 计数；
-- 后端 activity events、request ID，以及浏览器接收完成事件；
-- 与该 indicator 实际语义匹配的 methodology、quality、activity disclosures；
-- 当前所选 indicator 的 CSV 下载。
-
-多 indicator 不会合并后台记录；详情区始终明确对应一个选中的 indicator。
+- “添加坐标”逐个增加图表，达到 8 个后按钮禁用；
+- 空坐标可删除；若其中仍有 indicator，会要求先移动或删除；
+- 同日 hover 不向前填充、不插值、不选择最近交易日；
+- X zoom/双击恢复同步到全部图，Y 轴保持各自范围；
+- 每条 indicator 可单独查看详情、方法、质量、activity、request audit 与 CSV。
 
 ## IV maturity 语义
 
-- `sliding` 是 BNP OpenAPI 的 maturity rule，不是本项目创造的。`3M` 表示每个观察日都取当时剩余期限约为 3M 的理论期限。
-- Sliding tenor 输入允许键盘输入，但 BNP OpenAPI 1.60.0 只接受 capability registry 返回的官方 tenor。输入 `13D` 之类的非官方值会本地明确拒绝，不伪装成行情缺失。
-- `fixed` 与 `listed` 都是 BNP OpenAPI maturity rule。官方组合表把 `fixed` 描述为允许 theoretical maturities 的固定日期模式，把 `listed` 描述为不包含 theoretical maturities 的实际挂牌期限模式。
-- Fixed/Listed expiry 均允许手输任意合法日期。BNP 没有返回该精确点时保持缺失，不改成最近 expiry。
-- 选择 `listed` 时可按 observation date 请求一次无边界 fixed-strike surface，查看 BNP 当天实际返回的 expiry/strike。只有用户点击应用才写入草稿。
+### 主 UI 暴露的两种模式
+
+- **Sliding tenor**：例如 `1M`、`3M`。每个 observation date 都按对应剩余期限取理论期限点；合法 tenor 以 capabilities/OpenAPI 为准。
+- **Listed expiry**：用户先给 observation date，系统自动查询该日实际返回的 listed expiries，再由用户从可用 expiry 中选择精确到期日。
+
+### Fixed 的当前定位
+
+`fixed` 仍存在于 BNP OpenAPI、后端 request model 和 legacy 配置兼容层中，但**不作为新建 indicator 主 UI 的普通 maturity 入口**。
+
+Fixed 的含义也不是“任意日历日期都有理论插值”。OpenAPI 的 fixed/listed 语义都受实际上游可用 maturity 集合约束；当请求坐标不存在时保持缺失/NO_DATA，不自动选择最近 expiry。
+
+### Listed expiry discovery
+
+当前 Listed expiry 不再使用旧的“手输日期 → Load → Apply”流程：
+
+1. 用户选择 instrument 与 observation date；
+2. 页面自动发起单日 surface discovery；
+3. 下拉直接展示该日实际返回的 listed expiries；
+4. 用户选择一个精确 expiry；
+5. observation date 改变时重新 discovery，并用 request sequence guard 防止旧异步响应覆盖新日期。
+
+不会静默把用户日期改成最近交易日，也不会把不存在的 expiry 替换成附近期限。
 
 ## IV strike 语义
 
-- Percentage moneyness 继续区分 `K/F`（relative to forward）和 `K/S`（relative to spot reference）。
-- Percentage 可以键盘输入，但必须命中 BNP OpenAPI 的离散档位；不取整、不选最近值。
-- Delta 只与 sliding maturity 组合，并只接受 BNP 官方 put/call delta codes。
-- Absolute strike 接受任意正数。精确 strike 不存在时保持缺失。
-- Listed + absolute strike 可通过坐标发现加载实际 expiry，再查看该 expiry 下 effective IV 有效的 strikes；无效点不进入下拉，但保留质量状态。
+- Percentage moneyness 区分 `K/F`（relative to forward）和 `K/S`（relative to spot reference）；
+- Delta 只在 BNP 支持的 maturity/rule 组合下使用，并接受官方 put/call delta codes；
+- Absolute strike 接受正数，但精确 strike 不存在时保持缺失，不自动映射最近值；
+- **Listed expiry + absolute strike**：选定 observation date 与 listed expiry 后，页面自动读取该 expiry 下实际返回的 strikes；strike 输入框同时支持自由键入与下拉建议，不需要单独的 Load/Apply；
+- 不支持的 `Sliding tenor + absolute strike` 不会被静默改写成某个 listed expiry。
 
-## Vol convention 与 Layout
+## Volatility convention 与 Layout
 
-这两个字段都来自 BNP OpenAPI，不是本项目发明的，并按用户要求继续保留在主 indicator 表单：
+`volatilityConvention` 与 `layout` 仍属于 BNP wire/backend contract，但已从主 indicator builder 的普通交互中移出：
 
-- `volatilityConvention`：默认 `bsVol`；OpenAPI 说明通常只有 `bsVol` 可用，`bnppVol` 只用于 dividend volatility。
-- `layout`：控制 BNP 返回 surface 的结构。`matrix` 是 maturity rows × strike columns；`vector` 是按同一坐标顺序展开的扁平数组。项目 parser 会把两种结构标准化，layout 不改变指标的经济含义。
+- `volatilityConvention` 默认 `bsVol`；
+- `layout` 默认 `matrix`；parser 仍支持合同允许的返回布局并标准化；
+- 实际 wire 值继续出现在 Request Audit / Methodology 中；
+- legacy 配置仍可被后端理解，但新 UI 不要求用户每天手动选择这两个技术字段。
 
-每个 indicator 独立保存这两个选择，并在保存卡片中披露，不做隐藏或锁定。
+因此，2026-08-07 文档中“这两个字段继续保留在主 indicator 表单”的表述已经废弃。
 
 ## 非 IV indicator 的数据路径
 
-当前 Cortex implied-volatility response 同时携带 spot 和 forward curve，项目没有独立 spot endpoint。因此：
+当前 Cortex implied-volatility response 同时携带 spot 和 forward curve，项目没有独立 spot endpoint：
 
-- RV 使用 BNP spot 计算，并以 `3M K/F 100%` IV request 作为取数载体；该 IV 坐标不进入 RV 公式；
-- Spot 使用同一个 reference request，只读取原始未复权 spot；
-- Forward 使用用户所选 maturity，并以 `K/F 100%` 请求取得对应 forward curve；
-- 用户仍可为这些载体选择 Vol convention 与 Layout；错误 entitlement/组合按 BNP 原始错误明确显示。
+- RV 使用 spot 计算，并以 reference IV request 作为取数载体；该 IV 坐标不进入 RV 公式；
+- Spot 读取原始 spot；
+- Forward 按用户所选 maturity 从对应 forward curve 读取；
+- reference carrier、wire 参数与方法边界在 Methodology / Request Audit 中披露；
+- entitlement、NO_DATA、schema 等错误通过统一错误契约返回，不做隐藏 fallback。
 
-这些不是静默假设：builder note 与保存后的 indicator 卡片都会显示载体坐标、未复权边界和 wire 参数。
+## Error / cache / upstream 语义
 
-FX 是 instrument 类型，不是一个独立 indicator。未来开放 FX instrument catalogue 后，仍使用 Spot、Forward、IV 等指标；当前 catalogue 只开放 equity，本阶段不伪造没有后端语义的 `FX indicator`。
+- 上游 `suggestedAction` 若存在，只对白名单字段做脱敏后保留，并标记 `suggestedActionSource=upstream`；否则使用本地 fallback；
+- covering cache 裁剪后若目标日期没有 observation，Surface 返回 `NO_DATA`，不会因 cache 命中而返回 `200 snapshots=[]`；
+- 相同 request hash 的并发请求 single-flight 合并；不同真实 Cortex HTTP attempts 进程内最多 4 个同时执行；
+- cache hit / fixture 不占 upstream 并发 slot。
 
-## 用户检查项
+## 当前已知 legacy UI 边界
 
-1. 1–5 个上下图表的添加顺序和高度是否符合预期。
-2. IV maturity 先选 sliding/fixed/listed，再输入期限的顺序是否自然。
-3. Strike 先选 percentage/delta/absolute；percentage 再选 K/F 或 K/S，是否自然。
-4. Vol convention 与 Layout 的位置和解释是否应继续保持现状。
-5. 每个 indicator 的独立 instrument、目标坐标及保存卡片移动功能是否自然。
-6. 鼠标经过任一图表时，其他图表是否清楚显示同一天的数据；某标的当天缺失时是否正确保持缺失。
-7. 框选矩形后所有图表 X 轴是否同步，而各图 Y 轴是否仍适合自己的数值范围。
-8. 添加、启用/停用、删除及“刷新激活项”是否符合对“保存 indicator”的理解。
-9. 刷新或关闭后重新打开页面，图表数量、indicator instrument、所属坐标、日期和启用状态是否恢复。
-10. 保存卡片“查看详情”和结果区下拉能否清楚切换数据表、方法、质量、activity 与 disclosures。
-11. Spot/RV 的 reference IV request 提示是否足够清楚。
+Bulk Maturity 仍保留 legacy `Fixed date` 入口。它不改变主 indicator builder 的当前契约，后续作为独立 cleanup 处理；在此之前不要把 Bulk 的 legacy 选项反向解释成主 UI 重新支持“任意 fixed date”。
 
-本阶段没有修改后端数值公式、精确坐标语义、无效 IV 排除、RV 任意整数窗口或 raw/effective 数据边界。
+## 用户验收重点
 
-## 当前验证
+1. 1–8 个图表的添加、删除、移动与高度是否符合使用习惯；
+2. Sliding tenor / Listed expiry 的选择顺序是否自然；
+3. observation date 改变时 listed expiries 是否自动且稳定刷新，不发生旧日期回跳；
+4. Listed + absolute strike 是否自动给出 strike suggestions，同时允许键盘输入；
+5. 不存在的 expiry/strike/date 是否明确保持 NO_DATA，而不是选最近值；
+6. 每个 indicator 的独立 instrument、目标坐标、编辑/复制/启停功能是否自然；
+7. hover 任一图表时，其他图是否只显示同一天精确存在的数据；
+8. X 轴同步 zoom、各自 Y 轴、自定义统计列与 board 恢复是否符合预期；
+9. Request Audit / Methodology / Quality / Activity 是否准确对应当前 indicator；
+10. 普通 UI 尽量 vendor-light，但 BNP/Cortex 名称不作为 correctness hard gate，wire/audit 场景可按需要出现。
+
+## 验证口径
+
+GitHub Actions 已作为当前自动 Gate。每个 PR 与每次 push 到 `master` 自动执行：
 
 ```text
-JavaScript syntax check: PASS
-python -m pytest -q: 101 passed
-ruff check / format check: PASS
-compileall: PASS
-git diff --check: PASS（仅 Windows LF→CRLF 提示）
-fixture HTTP smoke: health 200；页面与 compare-builder.js 200
-fixture compare smoke: US_QQQ 与 US_SPY 均返回 7 rows 且 source code 与独立请求一致；activity 6；disclosures 17；compare CSV 200
+install .[dev]
+compileall
+Ruff
+pytest
 ```
 
-当前任务没有暴露应用内浏览器控制接口，因此没有把点击与视觉检查误报为自动通过。脱敏 fixture 服务已启动在 `http://127.0.0.1:8000/`，最终 Gate 仍需用户按上面的检查项验收。
+不要在本文长期维护固定的“xx passed”测试数量；新增测试后该数字会自然变化，GitHub Actions 的最新 green run 才是权威自动验证证据。
+
+本阶段没有改变 RV 数学定义、IV raw/effective 边界、精确坐标原则、invalid IV 排除规则或不做最近值替代的基本原则。

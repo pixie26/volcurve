@@ -1,40 +1,41 @@
 # Cortex Vol Analytics
 
-内部波动率分析 Web 工具,数据源为 BNP Paribas Cortex DataHub API。
-拉取隐含波动率(IV)与已实现波动率(RV),做 IV−RV、分位数、z-score、相关性等对比分析,提供 REST API 与离线前端页面。
+内部波动率分析 Web 工具，数据源为 BNP Paribas Cortex DataHub API。
+拉取隐含波动率（IV）与已实现波动率（RV），做 IV−RV、分位数、z-score、相关性等对比分析，提供 REST API 与离线前端页面。
 
 ## 技术栈
 
-- **Python ≥ 3.11**(见 `pyproject.toml`)
+- **Python ≥ 3.11**（见 `pyproject.toml`）
 - **FastAPI + Uvicorn** — REST API
-- **httpx** — Cortex DataHub 客户端(重试 / 429 退避 / 401 重认证 / 持久缓存)
+- **httpx** — Cortex DataHub 客户端（重试 / 429 退避 / 401 重认证 / 持久缓存）
 - **pandas + PyArrow + DuckDB** — 标准化存储与查询
-- **Plotly**(离线 vendor bundle,不走 CDN)
-- **pytest** — 单元 + 契约测试
+- **Plotly**（离线 vendor bundle，不走 CDN）
+- **pytest + Ruff + GitHub Actions** — 单元/集成测试与 CI gate
 
 ## 目录结构
 
-```
+```text
 app/
   clients/cortex/   # BNP 认证、客户端、解析、错误、模型
-  domain/           # 归一化请求/观测/标的模型(BNP 线格式仅在此转换)
+  domain/           # 归一化请求/观测/标的模型（BNP wire 格式在边界层转换）
   storage/          # raw 原始落盘 + normalized parquet + DuckDB 目录 + 缓存
-  analytics/        # RV、对齐预热、质量标记、统计(分位/z-score/相关性)
+  analytics/        # RV、对齐预热、质量标记、统计（分位/z-score/相关性）
   security/         # 日志脱敏
-  web/              # Phase D 单页 Web、样式与离线 Plotly bundle
+  web/              # 单页 Web、样式与离线 Plotly bundle
   config.py
-scripts/            # 各 Gate 探针(auth/instruments/qqq/cache)与 fixture 生成
+  version.py        # 应用/package 版本唯一来源
+scripts/            # 各 Gate 探针与 fixture 生成
 tests/fixtures/     # 脱敏后的离线响应样本
 schemas/            # Cortex OpenAPI 规范
-docs/bnp/           # 离线 BNP 官方文档与 SDK 源码(不联网)
-data/               # raw + normalized + catalog.duckdb(gitignored,可从 raw 重建)
+docs/bnp/           # 离线 BNP 官方文档与 SDK 源码（不联网）
+data/               # raw + normalized + catalog.duckdb（gitignored，可从 raw 重建）
 ```
 
 ## 配置
 
-复制 `.env.example` 为 `.env`,填入凭证:
+复制 `.env.example` 为 `.env`，填入凭证：
 
-```
+```text
 BNP_CLIENT_ID=
 BNP_CLIENT_SECRET=
 BNP_TOKEN_URL=https://api.cib.bnpparibas.com/oauth2/v1/token
@@ -42,13 +43,13 @@ BNP_BASE_URL=https://api.cib.bnpparibas.com/gm-cortex-datahub
 CORTEX_MODE=live        # live | fixture
 ```
 
-`.env` 与 `data/` 均在 `.gitignore` 中;raw API 响应可能含授权行情数据,**绝不入库**。
-凭据不落盘、不进日志,token 内存缓存并提前 60s 刷新。
+`.env` 与 `data/` 均在 `.gitignore` 中；raw API 响应可能含授权行情数据，**绝不入库**。
+凭据不落盘、不进日志，token 内存缓存并提前 60s 刷新。
 
 ## 运行模式
 
 - `CORTEX_MODE=live` — 真实调用 Cortex API
-- `CORTEX_MODE=fixture` — 离线模式,从 `tests/fixtures/` 读取脱敏样本,无需凭证
+- `CORTEX_MODE=fixture` — 离线模式，从 `tests/fixtures/` 读取脱敏样本，无需凭证
 
 ## 安装（PowerShell）
 
@@ -66,87 +67,79 @@ python -m pytest -q
 ```
 
 浏览器打开 `http://127.0.0.1:8000/`。REST 入口包括 `capabilities`、`instruments`、
-`vol/compare`、`vol/surface`、`vol/compare.csv` 与 health；页面只展示 capability registry 中
-`enabled=true` 的请求模式。
+`vol/compare`、`vol/surface`、`vol/compare.csv`、Cortex Playground 与 health。
+页面只展示 capability registry 中 `enabled=true` 的请求模式。
 
-在 `Fixed/Listed · 绝对 strike` 模式中，可按 instrument 和 observation date 点击“加载可用坐标”。
-页面通过单日、无 strike/expiry 边界的 `fixed maturity + fixed strike` Surface 请求读取 BNP 当天
-实际返回的 listed expiries；选择 expiry 后，只把该 expiry 下 effective IV 有效的 strikes 放入下拉。
-无效坐标数量和 flags 仍会显示，任何 expiry/strike 都必须由用户明确选择并应用，不做最近值替代。
+## 当前 Time Series 查询语义
 
-## Gate 探针(逐阶段验收)
+主 indicator builder 只把两类 maturity 暴露给新建 indicator：
+
+- **Sliding tenor**：例如 `1M`、`3M`，按每个 observation date 的剩余期限取点；
+- **Listed expiry**：先选 observation date，页面自动读取当天实际 listed expiries，再由用户选择精确 expiry。
+
+`fixed` maturity 仍保留在后端/OpenAPI/legacy 配置兼容层中，但不作为新主 UI 的普通入口；它不代表“任意日历日期都可插值”。
+
+Strike 仍支持 percentage moneyness（K/F 或 K/S）、delta（仅合法组合）与 absolute strike。对于 **Listed expiry + absolute strike**，选择 expiry 后页面会自动读取该 observation date/expiry 下实际返回的 strikes，输入框同时支持键盘输入与下拉建议；不会静默映射到最近 strike 或最近 expiry。
+
+`volatilityConvention` 与 `layout` 仍属于 wire/backend contract，默认使用受支持值并在 request/methodology 中披露，但不再占用主 indicator builder 的普通交互位置。
+
+Time Series 工作台当前最多支持 **8 个**上下排列坐标；每个 indicator 独立保存 instrument、所属坐标和启用状态。跨图 hover 使用同一个精确 observation date，不前填、不插值、不选择最近交易日。
+
+## Cortex 请求稳定性
+
+- 相同 request hash 的并发请求由 single-flight 合并为一次 upstream call；
+- 不同真实 Cortex HTTP attempts 共享进程内并发上限，当前最多 **4 个**同时执行；
+- cache hit 与 fixture 不占 upstream slot；429/5xx 重试在 backoff 前释放 slot；
+- 当前部署约束仍是 `--workers 1`，因此该上限等同于服务级最多 4 个同时 upstream attempts。
+
+## Gate 探针（逐阶段验收）
 
 | 脚本 | 阶段 | 作用 |
-|------|------|------|
-| `scripts/auth_probe.py` | Gate 0 | 认证 / 连通 / entitlement(403 即停) |
-| `scripts/instruments_probe.py` | Phase 1 | 拉取标的清单,实况解析 QQQ 的 BNP code |
-| `scripts/qqq_probe.py` | Phase 1 | IV 探针,确定 matrix 方向与 IV 单位,产出 `qqq_probe.csv` |
+|---|---|---|
+| `scripts/auth_probe.py` | Gate 0 | 认证 / 连通 / entitlement（403 即停） |
+| `scripts/instruments_probe.py` | Phase 1 | 拉取标的清单，实况解析 QQQ 的 BNP code |
+| `scripts/qqq_probe.py` | Phase 1 | IV 探针，确定 matrix 方向与 IV 单位，产出 `qqq_probe.csv` |
 | `scripts/make_fixtures.py` | Phase 1 | 由 live 响应生成脱敏 fixture |
-| `scripts/cache_probe.py` | Gate 2 | 同请求跑两次(live→cache),验证标准化结果一致 |
+| `scripts/cache_probe.py` | Gate 2 | 同请求跑两次（live→cache），验证标准化结果一致 |
 | `scripts/validate_rv.py` | Phase E | live 10 日期 IV 核对与独立 RV 复算 |
 | `scripts/phase_c_api_probe.py` | Phase E | live fixed/delta/listed 与 API/CSV 一致性 |
 | `scripts/audit_raw_hashes.py` | Phase E | 对所有 COMPLETED raw payload 重算 hash |
 | `scripts/secret_scan.py` | Phase E | 扫描候选文件、完整可达 Git 历史及当前配置值 |
 
-## 计算口径(确认)
+## 计算口径（确认）
 
-- **RV**:收盘对数收益 `r_t = log(S_t/S_{t-1})`,样本标准差 ddof=1 去均值(=Excel `STDEV.S`),`√252` 年化
-- **预热**:拉取起始日 = 用户起始日 − `ceil(窗口×7/5)` − 10 日历日;显示区间严格不变;尾部留空不补零
-- **IV 单位 / matrix 方向**:由 Phase 1 探针确认,见数据契约
+- **RV**：收盘对数收益 `r_t = log(S_t/S_{t-1})`，样本标准差 ddof=1 去均值（=Excel `STDEV.S`），`√252` 年化
+- **预热**：拉取起始日 = 用户起始日 − `ceil(窗口×7/5)` − 10 日历日；显示区间严格不变；尾部留空不补零
+- **IV 单位 / matrix 方向**：由 Phase 1 探针确认，见数据契约
 
 ## 数据恢复
 
-`data/raw/` 为权威源;`data/normalized/` 与 `data/catalog.duckdb` 可从 raw 重建。
-raw 响应 gzip 压缩,以请求哈希命名;normalized 落 parquet。
+`data/raw/` 为权威源；`data/normalized/` 与 `data/catalog.duckdb` 可从 raw 重建。
+raw 响应 gzip 压缩，以请求哈希命名；normalized 落 parquet。
 
-## 当前状态（2026-08-07 优化后）
+## 当前状态（2026-08-08）
 
-- ✅ Phase 0 — 项目骨架、离线文档、认证管理、Gate 0
-- ✅ Phase 1 — instrument + QQQ IV 探针,方向/单位确认
-- ✅ Phase 2 — Cortex 客户端(重试/429/401/缓存)、raw+DuckDB 存储、fixture 模式,Gate 2 PASS
-- ✅ Phase 3 — RV/IV−RV/分位/z-score/相关性计算 + 独立复算
-- ✅ Phase A 正确性加固 — invalid IV、duplicate、完整 cache 状态、forward 自动追加、质量响应契约、UTC、latest comparable、return-outlier 语义（Gate A PASS）
-- ✅ Phase B — request models、独立 serializer、多模式 parser、fixtures、disclosures 与七组真实 API probes 全部通过（Gate B PASS）
-- ✅ Phase C / Phase 4 — FastAPI instruments、compare、surface、CSV、统一 errors、activity events 与 live API probes 全部通过（Gate C PASS）
-- ✅ Phase D / Phase 5 — 动态 Web、Compare/Surface、listed 合约坐标发现、smile/term structure、表格/CSV、methodology、quality/activity/disclosures（技术 Gate 通过，UX 待修订）
-- ✅ Phase E / Phase 6–7 — 独立数值核对、完整 secret/dependency scan、single-worker 部署与运维说明（Gate E PASS；Docker build 待部署主机复验）
-- 🚧 Phase F1 — Compare 支持最多 5 个上下同步坐标、每 indicator 独立标的、同日 hover、矩形 zoom 与跨页面重开恢复；逐 indicator 数据、方法、质量、activity、disclosures 与 CSV 已接回；等待用户 UI 验收
-- 🚧 Phase F2 — 跨坐标 hover 读数条与同步竖向指示线（hover 任一坐标即读出该日期在全部坐标上的数值）、查询栏改为「日期范围 → underlying + 坐标 → indicator」单一入口、saved indicator 之间的 ＋ − × ÷ 组合指标、显示中指标的区间统计表；等待用户 UI 验收
-- 🚧 Phase F3 — saved indicator 支持就地编辑与复制；board（具名可重载页面）保存 indicator 配置 + 坐标布局 + 日期范围并在载入时重新取数；区间统计扩展到 24 项（变化/IQR/z-score/极值日期/最大单日涨跌/偏度/峰度/自相关等），列的显示与顺序可自定义并保存；等待用户 UI 验收
+- ✅ Phase 0–E：认证、Cortex client、存储、IV/RV analytics、API、Web、数值与部署 Gate 已完成；
+- ✅ Phase F Time Series：最多 8 个坐标、每 indicator 独立 instrument、同日 hover、同步 X zoom、indicator 组合、统计表、就地编辑/复制、board 持久化均已实现；
+- ✅ Listed expiry / absolute strike：改为 observation date 驱动的直接 discovery，不再要求 Load/Apply；
+- ✅ Error provenance：保留并安全展示上游 `suggestedAction`，同时区分 upstream/local fallback；
+- ✅ Stabilization Step 1–4：修 stale tests、加入 GitHub Actions CI、统一 empty surface→`NO_DATA`、启用 Cortex upstream 并发上限；
+- 🚧 后续 UX/工程 cleanup：Bulk Maturity 中 legacy Fixed date、raw-error logging 等继续单独处理。
 
-代码级审阅、原计划修订意见和 Gate 状态见
-[`docs/optimization_review_zh.md`](docs/optimization_review_zh.md)。
-Phase A 的逐项验收证据见
-[`docs/phase_a_acceptance_zh.md`](docs/phase_a_acceptance_zh.md)。
-Phase B 的完整验收与 live probe 证据见
-[`docs/phase_b_acceptance_zh.md`](docs/phase_b_acceptance_zh.md)。
-Phase C 的 REST API、fixture/live Gate 与用户检查项见
-[`docs/phase_c_acceptance_zh.md`](docs/phase_c_acceptance_zh.md)。
-Phase D 的 Web 功能、浏览器验收证据与用户检查项见
-[`docs/phase_d_acceptance_zh.md`](docs/phase_d_acceptance_zh.md)。
-Phase E 的逐项结果与环境边界见
-[`docs/validation_report.md`](docs/validation_report.md)，部署步骤见
-[`docs/operations_runbook_zh.md`](docs/operations_runbook_zh.md)，licensed raw data 边界见
-[`docs/data_retention_policy_zh.md`](docs/data_retention_policy_zh.md)。
-Compare indicator builder 的产品语义、BNP 字段解释和用户检查项见
-[`docs/phase_f_compare_indicator_builder_zh.md`](docs/phase_f_compare_indicator_builder_zh.md)。
+代码级审阅、原计划修订意见和 Gate 状态见 [`docs/optimization_review_zh.md`](docs/optimization_review_zh.md)。
+Phase A/B/C/D/E 的验收证据分别见对应 `docs/phase_*` 文档与 [`docs/validation_report.md`](docs/validation_report.md)。
+部署步骤见 [`docs/operations_runbook_zh.md`](docs/operations_runbook_zh.md)，licensed raw data 边界见 [`docs/data_retention_policy_zh.md`](docs/data_retention_policy_zh.md)。
+Time Series indicator builder 当前产品语义见 [`docs/phase_f_compare_indicator_builder_zh.md`](docs/phase_f_compare_indicator_builder_zh.md)。
 
-## Phase E 最终交付（已完成）
+## CI 与版本
 
-用户已允许 Phase D 的 UX 修订不阻塞最后一个阶段 Phase E。本阶段已交付：
-
-- 独立 IV/RV 与 fixed/delta/listed 抽样核对结果；
-- Web 页面、REST API 与 CSV 的一致性验证入口；
-- secret scan、dependency audit 与 raw hash 验证命令；
-- Docker、single-worker 内网部署方式和健康检查；
-- licensed raw data 保留边界、故障处理及日常运维入口；
-- 最终 validation report、operations runbook 与 raw retention policy。
-
-Gate E 已通过。当前主机没有 Docker CLI，因此 Dockerfile 通过静态契约、隔离 production install、wheel build 与真实 Uvicorn smoke 验证；实际 image build 和持久卷 health 仍须在部署主机完成，详见 validation report。
+每个 PR、每次 push 到 `master` 都由 `.github/workflows/ci.yml` 执行 install、compile、Ruff 与 pytest。
+应用/package 当前版本为 **0.4.0**；唯一版本常量在 `app/version.py`，FastAPI metadata 与 setuptools package metadata 均从该值读取。Docker tag 也按同一版本执行，见 operations runbook。
 
 ## 安全
 
-- 凭证、token、Authorization 头不落盘、不进日志、不回显
-- `app/security/redaction.py` 负责日志脱敏
-- raw 行情数据不入 git
-- `/health/ready` 的 Cortex 连通性用缓存结果,不触发 token 获取
+- 凭证、token、Authorization 头不落盘、不进日志、不回显；
+- `app/security/redaction.py` 负责日志脱敏；
+- raw 行情数据不入 git；
+- `/health/ready` 的 Cortex 连通性用缓存结果，不触发 token 获取；
+- Cortex Playground 当前为小型可信内部团队保留；未来若团队/访问范围扩大，需重新评估独立 enable flag 或额外访问控制，决策留痕见 operations runbook。

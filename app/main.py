@@ -17,10 +17,11 @@ from app.api.health import router as health_router
 from app.api.instruments import router as instruments_router
 from app.api.vol_compare import router as compare_router
 from app.api.vol_surface import router as surface_router
+from app.version import __version__
 
 app = FastAPI(
     title="Cortex Vol Analytics",
-    version="0.4.0",
+    version=__version__,
     description="Internal volatility analytics backed by Cortex DataHub.",
 )
 
