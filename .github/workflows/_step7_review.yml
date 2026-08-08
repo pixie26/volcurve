@@ -1,0 +1,61 @@
+name: Step 7 review hardening
+
+on:
+  push:
+    branches:
+      - feat/step7-historical-archive
+
+permissions:
+  contents: write
+
+jobs:
+  harden-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: feat/step7-historical-archive
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Apply review fixes
+        run: python scripts/_step7_review_fix.py
+
+      - name: Remove review bootstrap files
+        run: |
+          rm scripts/_step7_review_fix.py
+          rm .github/workflows/_step7_review.yml
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Compile Python
+        run: python -m compileall -q app tests
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Historical archive deep tests
+        run: python -m pytest -q tests/unit/test_historical_archive.py tests/unit/test_storage_and_cache.py tests/unit/test_surface_modes.py tests/integration/test_phase_d_web.py
+
+      - name: Full suite
+        run: python -m pytest -q
+
+      - name: Diff check
+        run: git diff --check
+
+      - name: Commit reviewed implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden historical archive provenance and cleanup"
+          git push origin HEAD:feat/step7-historical-archive
