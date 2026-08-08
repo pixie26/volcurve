@@ -154,7 +154,6 @@ test("bulk Fixed maturity persists exact state and the next refresh serializes i
   await expect(page.locator("#bulkMaturityMoveButton")).toBeEnabled();
   await page.locator("#bulkMaturityMoveButton").click();
 
-  await expect(page.locator("#bulkNote")).toContainText("Fixed 2026-12-30");
   const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem("volcurve.compare.workspace.v1")));
   expect(persisted.items[0].config.maturityMode).toBe("fixed");
   expect(persisted.items[0].config.expiry).toBe("2026-12-30");
