@@ -93,11 +93,11 @@ def test_main_builder_keeps_exact_coordinate_and_wire_defaults() -> None:
 
 
 def test_bulk_fixed_is_presented_as_exact_request_not_guaranteed_data() -> None:
-    html, _, compare_js = _assets()
+    html, _, _ = _assets()
 
+    # The exact serialized behavior is exercised in Playwright; Python only protects
+    # the user-visible contract here.
     assert "Fixed 按精确日期请求，可能返回 NO_DATA" in html
-    assert "Delta IV 不支持 Fixed maturity" in compare_js
-    assert "Absolute strike IV 不支持 Sliding maturity" in compare_js
 
 
 def test_browser_configuration_not_market_payload_is_persisted() -> None:
@@ -111,8 +111,6 @@ def test_browser_configuration_not_market_payload_is_persisted() -> None:
 def test_runtime_behavior_is_owned_by_executable_frontend_suites() -> None:
     """Keep the Python suite from drifting back toward source-code pseudo-tests."""
 
-    # The executable suites are part of the repository contract.  Python checks only
-    # that the entry points exist; Node and Playwright execute the actual behavior in CI.
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
