@@ -714,3 +714,23 @@ def test_local_async_errors_render_backend_suggested_action():
     assert "strikeSuggestedAction" in compare_javascript
     assert "suggestedActionSource" in compare_javascript
     assert "action ${data.suggestedActionSource}" in playground
+
+
+def test_bulk_maturity_only_exposes_sliding_tenor():
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/compare-builder.js").text
+
+    panel = html.split('id="bulkMaturityPanel"', 1)[1].split("</section>", 1)[0]
+    assert 'id="bulkSlidingMaturity"' in panel
+    assert 'id="bulkMaturityMode"' not in panel
+    assert "bulkFixedMaturity" not in panel
+    assert "Fixed date" not in panel
+
+    bulk_logic = javascript.split("function renderBulkMaturityControls", 1)[1].split(
+        "function applyBulkInstrument", 1
+    )[0]
+    assert "bulkMaturityMode" not in bulk_logic
+    assert "bulkFixedMaturity" not in bulk_logic
+    assert 'item.config.maturityMode = "sliding"' in bulk_logic
+    assert "Listed expiry 暂不支持批量修改" in bulk_logic

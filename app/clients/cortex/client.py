@@ -836,10 +836,11 @@ class CortexClient:
             )
 
         logger.warning(
-            "cortex upstream %s cid=%s body=%s",
+            "cortex upstream status=%s cid=%s code=%r message=%r",
             status,
             correlation_id,
-            redact(response.text[:300]),
+            upstream_code,
+            upstream_message,
         )
         if status == 400:
             fail(ErrorCode.INVALID_REQUEST, "上游拒绝请求参数(400)")

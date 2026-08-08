@@ -6,7 +6,8 @@
 ## 部署约束
 
 - 仅部署在获准访问 BNP Cortex 的内网/受控环境。
-- GitHub 仓库当前为 public；安全边界**不得依赖 repository visibility**。`.env`、token、licensed raw response、内部部署 secret 或未脱敏行情样本不得提交 Git。若未来需要把上述内部材料纳入仓库，应先把仓库改为 private/restricted。
+- GitHub 仓库当前为 public；安全边界**不得依赖 repository visibility**。`.env`、token、licensed raw response、内部部署 secret 或未脱敏行情样本不得提交 Git。
+- **Release TODO：项目完善并进入正式团队交付前，将 GitHub repository 切换为 private。** 这是一项明确的发布清单要求，不替代 secret/raw-data 的独立安全边界。
 - Uvicorn 固定 `--workers 1`。当前进程内 singleton client、连接状态 beacon、本地 DuckDB/cache 与 process-wide upstream limiter 都按单 worker 设计。
 - `.env`、token、`data/` 不得复制进 image。凭据由运行环境或 secret manager 注入。
 - `/app/data` 必须挂载持久卷；否则容器重建会丢失 raw 权威源与 catalog。
