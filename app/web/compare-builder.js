@@ -200,7 +200,9 @@
     on("bulkInstrumentResults", "click", handleBulkInstrumentResultClick);
     on("bulkUnderlyingTab", "click", () => setBulkEditMode("underlying"));
     on("bulkMaturityTab", "click", () => setBulkEditMode("maturity"));
+    on("bulkMaturityMode", "change", renderBulkMaturityControls);
     on("bulkSlidingMaturity", "change", syncBulkMaturityButtons);
+    on("bulkFixedMaturity", "change", syncBulkMaturityButtons);
     on("bulkMaturityMoveButton", "click", () => applyBulkMaturity({ copy: false }));
     on("bulkMaturityCopyButton", "click", () => applyBulkMaturity({ copy: true }));
     on("addChartButton", "click", addChartLane);
@@ -1723,9 +1725,13 @@
   }
 
   function renderBulkMaturityControls() {
+    const mode = $("bulkMaturityMode")?.value === "fixed" ? "fixed" : "sliding";
+    $("bulkSlidingMaturityField")?.classList.toggle("is-hidden", mode !== "sliding");
+    $("bulkFixedMaturityField")?.classList.toggle("is-hidden", mode !== "fixed");
+
     const items = bulkMaturityItems();
     const select = $("bulkSlidingMaturity");
-    if (select) {
+    if (select && mode === "sliding") {
       const values = bulkMaturitySupportedTenors(items);
       const current = select.value;
       select.innerHTML = values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
@@ -1743,24 +1749,33 @@
         .map(itemById)
         .filter((item) => item && (item.type === "spot" || item.type === "realized_vol")).length;
       const suffix = ignored ? ` 另有 ${ignored} 个直接选中的 Spot/RV 没有 option tenor，会忽略。` : "";
-      help.textContent = `将修改 ${items.length} 个 IV / Forward；只支持批量改为 Sliding tenor，Listed expiry 暂不支持批量修改。${suffix}`;
+      help.textContent = `将修改 ${items.length} 个 IV / Forward。Sliding 与 Fixed date 支持批量；Fixed date 会按精确日期请求，坐标不存在时允许后端返回 NO_DATA，不做最近期限替代。Listed expiry 暂不作为批量目标。${suffix}`;
     }
     syncBulkMaturityButtons();
   }
 
   function syncBulkMaturityButtons() {
     const items = bulkMaturityItems();
-    const value = $("bulkSlidingMaturity")?.value || "";
+    const mode = $("bulkMaturityMode")?.value === "fixed" ? "fixed" : "sliding";
+    const value = mode === "sliding"
+      ? $("bulkSlidingMaturity")?.value || ""
+      : $("bulkFixedMaturity")?.value || "";
     const enabled = items.length > 0 && Boolean(value);
     if ($("bulkMaturityMoveButton")) $("bulkMaturityMoveButton").disabled = !enabled;
     if ($("bulkMaturityCopyButton")) $("bulkMaturityCopyButton").disabled = !enabled;
   }
 
-  function bulkMaturityCompatibility(items, value) {
+  function bulkMaturityCompatibility(items, mode, value) {
     if (!items.length) return "所选项里没有 IV 或 Forward 可以修改期限。";
-    const listed = items.filter((item) => item.config.maturityMode === "listed");
-    if (listed.length) {
-      return `有 ${listed.length} 个指标使用 Listed expiry；Listed 暂不支持批量修改期限，请先单独编辑。`;
+    if (mode === "fixed") {
+      if (!validIsoDate(value)) return "请选择合法的 Fixed maturity date。";
+      const delta = items.filter(
+        (item) => item.type === "implied_vol" && item.config.strikeKind === "delta",
+      );
+      if (delta.length) {
+        return `有 ${delta.length} 个 Delta IV；当前数据契约只支持 Delta + Sliding maturity，不能批量改成 Fixed date。`;
+      }
+      return null;
     }
     const supported = bulkMaturitySupportedTenors(items);
     if (!supported.includes(value)) return `当前所选指标不支持 Sliding tenor ${value || "(空)"}。`;
@@ -1773,10 +1788,14 @@
     return null;
   }
 
-  function applyMaturityToItem(item, value) {
-    item.config.maturityMode = "sliding";
-    item.config.slidingMaturity = value;
-    item.config.expiry = "";
+  function applyMaturityToItem(item, mode, value) {
+    item.config.maturityMode = mode;
+    if (mode === "sliding") {
+      item.config.slidingMaturity = value;
+      item.config.expiry = "";
+    } else {
+      item.config.expiry = value;
+    }
     item.status = initialStatus(item.type);
     item.response = null;
     item.request = null;
@@ -1785,14 +1804,17 @@
 
   function applyBulkMaturity({ copy }) {
     hideIndicatorFormError();
-    const value = $("bulkSlidingMaturity")?.value || "";
+    const mode = $("bulkMaturityMode")?.value === "fixed" ? "fixed" : "sliding";
+    const value = mode === "sliding"
+      ? $("bulkSlidingMaturity")?.value || ""
+      : $("bulkFixedMaturity")?.value || "";
     const items = bulkMaturityItems();
-    const problem = bulkMaturityCompatibility(items, value);
+    const problem = bulkMaturityCompatibility(items, mode, value);
     if (problem) return setBulkNote(problem, "is-error");
 
     const outcome = copy
-      ? bulkCopyMaturity(value)
-      : bulkMoveMaturity(items, value);
+      ? bulkCopyMaturity(mode, value)
+      : bulkMoveMaturity(items, mode, value);
     persistWorkspace();
     refreshWorkspacePanels();
     fetchMissingDependencies();
@@ -1800,16 +1822,17 @@
     setBulkNote(outcome);
   }
 
-  function bulkMoveMaturity(items, value) {
+  function bulkMoveMaturity(items, mode, value) {
     const renamed = items.filter((item) => indicatorAlias(item)).length;
-    for (const item of items) applyMaturityToItem(item, value);
-    const notes = [`已把 ${items.length} 个 IV / Forward 换成 Sliding ${value}。`];
+    for (const item of items) applyMaturityToItem(item, mode, value);
+    const label = mode === "fixed" ? `Fixed ${value}` : `Sliding ${value}`;
+    const notes = [`已把 ${items.length} 个 IV / Forward 换成 ${label}。`];
     if (renamed) notes.push(`其中 ${renamed} 个保留了原有别名，如不再合适请双击列头改名。`);
     notes.push(...duplicateWarning(items));
     return notes.join("");
   }
 
-  function bulkCopyMaturity(value) {
+  function bulkCopyMaturity(mode, value) {
     const targetIds = bulkMaturityTargetIds();
     const targets = indicatorState.items.filter((item) => targetIds.has(item.id));
     const maturityIds = new Set(
@@ -1830,7 +1853,7 @@
         error: null,
       };
       copy.config.alias = "";
-      if (maturityIds.has(source.id)) applyMaturityToItem(copy, value);
+      if (maturityIds.has(source.id)) applyMaturityToItem(copy, mode, value);
       idMap.set(source.id, copy.id);
       return copy;
     });
@@ -1846,19 +1869,12 @@
       (copy) => copy.type === "implied_vol" || copy.type === "forward",
     ).length;
     const derivedCount = copies.filter((copy) => copy.type === "derived").length;
+    const label = mode === "fixed" ? `Fixed ${value}` : `Sliding ${value}`;
     const notes = [
-      `已复制 ${copies.length} 个指标，其中 ${maturityCount} 个 IV / Forward 改为 ${value}${derivedCount ? `，${derivedCount} 个运算指标已接到复制出的操作数` : ""}。`,
+      `已复制 ${copies.length} 个指标，其中 ${maturityCount} 个 IV / Forward 改为 ${label}${derivedCount ? `，${derivedCount} 个运算指标已接到复制出的操作数` : ""}。`,
     ];
     notes.push(...duplicateWarning(copies));
     return notes.join("");
-  }
-
-  // What identifies an indicator as a series: not its name, and not which lane it sits in.
-  function coordinateSignature(item) {
-    const config = { ...item.config };
-    delete config.alias;
-    delete config.chartLane;
-    return stableStringify({ type: item.type, config });
   }
 
   function applyBulkInstrument({ copy }) {

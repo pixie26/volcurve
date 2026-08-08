@@ -716,21 +716,27 @@ def test_local_async_errors_render_backend_suggested_action():
     assert "action ${data.suggestedActionSource}" in playground
 
 
-def test_bulk_maturity_only_exposes_sliding_tenor():
+def test_bulk_maturity_allows_fixed_date_but_only_blocks_contract_invalid_combinations():
     with TestClient(app) as client:
         html = client.get("/").text
         javascript = client.get("/static/compare-builder.js").text
 
     panel = html.split('id="bulkMaturityPanel"', 1)[1].split("</section>", 1)[0]
-    assert 'id="bulkSlidingMaturity"' in panel
-    assert 'id="bulkMaturityMode"' not in panel
-    assert "bulkFixedMaturity" not in panel
-    assert "Fixed date" not in panel
+    assert 'id="bulkMaturityMode"' in panel
+    assert '<option value="sliding">Sliding tenor</option>' in panel
+    assert '<option value="fixed">Fixed date</option>' in panel
+    assert 'id="bulkFixedMaturity"' in panel
+    assert "可能返回 NO_DATA" in panel
 
     bulk_logic = javascript.split("function renderBulkMaturityControls", 1)[1].split(
         "function applyBulkInstrument", 1
     )[0]
-    assert "bulkMaturityMode" not in bulk_logic
-    assert "bulkFixedMaturity" not in bulk_logic
-    assert 'item.config.maturityMode = "sliding"' in bulk_logic
-    assert "Listed expiry 暂不支持批量修改" in bulk_logic
+    assert 'mode === "fixed"' in bulk_logic
+    assert "validIsoDate(value)" in bulk_logic
+    assert "Delta + Sliding maturity" in bulk_logic
+    assert "Absolute strike + Sliding maturity" in bulk_logic
+    assert 'item.config.maturityMode = mode' in bulk_logic
+    assert "坐标不存在时允许后端返回 NO_DATA" in bulk_logic
+    # A source indicator being Listed is not itself an invalid target conversion. Listed is
+    # simply not offered as a shared bulk target because its universe is discovered per date.
+    assert "个指标使用 Listed expiry" not in bulk_logic

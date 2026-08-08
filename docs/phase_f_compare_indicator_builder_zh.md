@@ -90,9 +90,14 @@ Fixed 的含义也不是“任意日历日期都有理论插值”。OpenAPI 的
 - 相同 request hash 的并发请求 single-flight 合并；不同真实 Cortex HTTP attempts 进程内最多 4 个同时执行；
 - cache hit / fixture 不占 upstream 并发 slot。
 
-## 当前已知 legacy UI 边界
+## Bulk Maturity 当前语义
 
-Bulk Maturity 仍保留 legacy `Fixed date` 入口。它不改变主 indicator builder 的当前契约，后续作为独立 cleanup 处理；在此之前不要把 Bulk 的 legacy 选项反向解释成主 UI 重新支持“任意 fixed date”。
+Bulk Maturity **有意支持** `Sliding tenor` 与 `Fixed date` 两种目标；这不改变主 indicator builder 仍以 Sliding + Listed 为普通新建入口的产品契约。
+
+- Fixed date 是一个精确 Cortex request coordinate，不代表任意日历日期都存在数据；合法请求可正常发出，坐标不存在时由后端返回 `NO_DATA`，前端不预判、也不替换成最近期限；
+- 只在组合已知违反数据契约时前端阻止，例如 `Delta IV + Fixed`、`Absolute strike IV + Sliding`；
+- `Listed expiry` 不作为统一 bulk target，因为可用 expiry universe 随 underlying × observation date 变化，需要逐项 discovery；
+- 一个当前使用 Listed expiry 的 source indicator，可以批量改成 Sliding 或 Fixed，只要目标组合本身合法。
 
 ## 用户验收重点
 
