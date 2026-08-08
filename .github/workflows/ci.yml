@@ -16,11 +16,13 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -28,14 +30,37 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install Python
         run: python -m pip install -e ".[dev]"
 
+      - name: Install frontend test tools
+        run: npm install --no-package-lock --no-audit --no-fund
+
       - name: Compile Python
-        run: python -m compileall -q app tests
+        run: python -m compileall -q app scripts tests
 
       - name: Ruff
         run: python -m ruff check .
 
-      - name: Tests
+      - name: Python tests
         run: python -m pytest -q
+
+      - name: JavaScript unit tests
+        run: npm run test:js
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke tests
+        run: npm run test:browser
+
+      - name: Secret scan
+        run: python scripts/secret_scan.py
+
+      - name: Diff check
+        run: git diff --check
