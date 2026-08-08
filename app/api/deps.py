@@ -35,9 +35,6 @@ def connectivity_status() -> dict:
 _CLIENT: CortexClient | None = None
 _CLIENT_LOCK = threading.Lock()
 
-# Bound concurrent compare requests so the single-user tool doesn't fan out.
-_COMPARE_SEMAPHORE = threading.BoundedSemaphore(4)
-
 
 def get_client(settings: Settings | None = None) -> CortexClient:
     global _CLIENT
