@@ -1,9 +1,8 @@
 """Independent Python oracle for the browser statistics tests.
 
-This file deliberately does not import app.analytics.statistics.  It mirrors the
-published formulas from first principles so the Node tests can catch accidental
-changes in the JavaScript implementation rather than comparing one copy of the
-same code with another.
+This file deliberately does not import app.analytics.statistics. It mirrors the formulas
+from first principles so the Node tests can catch accidental changes in the JavaScript
+implementation rather than comparing one copy of the same code with another.
 """
 
 from __future__ import annotations
@@ -67,12 +66,16 @@ def autocorrelation(values: list[float], mean: float, lag: int) -> float | None:
     return numerator / denominator
 
 
+def last_index(values: list[float], target: float) -> int:
+    return len(values) - 1 - values[::-1].index(target)
+
+
 def summarize(points: list[dict[str, object]]) -> dict[str, object] | None:
     usable = sorted(
         (
             {"date": str(point["date"]), "value": float(point["value"])}
             for point in points
-            if point.get("value") is not None
+            if point.get("value") is not None and math.isfinite(float(point["value"]))
         ),
         key=lambda point: point["date"],
     )
@@ -89,8 +92,8 @@ def summarize(points: list[dict[str, object]]) -> dict[str, object] | None:
     std_dev = math.sqrt(variance)
     minimum = sorted_values[0]
     maximum = sorted_values[-1]
-    min_index = values.index(minimum)
-    max_index = values.index(maximum)
+    min_index = last_index(values, minimum)
+    max_index = last_index(values, maximum)
     steps = [values[index] - values[index - 1] for index in range(1, count)]
     mean20 = average(values[-20:])
 
@@ -114,9 +117,7 @@ def summarize(points: list[dict[str, object]]) -> dict[str, object] | None:
         "p75": quantile(sorted_values, 0.75),
         "stdDev": std_dev,
         "iqr": quantile(sorted_values, 0.75) - quantile(sorted_values, 0.25),
-        "percentile": 100.0
-        * sum(value <= values[-1] for value in sorted_values)
-        / count,
+        "percentile": 100.0 * sum(value <= values[-1] for value in sorted_values) / count,
         "zScore": (values[-1] - mean) / std_dev if std_dev > 0 else None,
         "change1": change(values, 1),
         "change5": change(values, 5),
