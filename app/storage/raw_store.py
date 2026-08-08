@@ -1,8 +1,10 @@
-"""Raw response store: the authoritative source of truth.
+"""Verified raw request-cache store.
 
-Every successful upstream response is persisted verbatim (gzip JSON) at
-data/raw/{endpoint}/{request_hash}.json.gz. Normalized stores and the
-DuckDB catalog are derivable from these files and can be rebuilt.
+Every successful upstream response is first persisted verbatim (gzip JSON) at
+``data/raw/{endpoint}/{request_hash}.json.gz``.  These files remain the authority for
+an individual cached request while they are retained.  Step 7 may later compact expired
+request files after an eligible exact series has been committed to the revision-aware
+historical point library; therefore ``data/raw`` is no longer the permanent archive.
 """
 
 from __future__ import annotations

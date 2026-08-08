@@ -10,7 +10,7 @@ import pytest
 from app.api.presenters import _source_info
 from app.clients.cortex.client import CortexClient, FetchResult
 from app.clients.cortex.errors import CortexError, ErrorCode
-from app.clients.cortex.serializers import volatility_coordinate_hash
+from app.clients.cortex.serializers import serialize_volatility_request, volatility_coordinate_hash
 from app.domain.observations import QualityFlag, StandardObservation
 from app.domain.requests import FixedStrikeRequest, SlidingDeltaRequest, SlidingMoneynessRequest
 from app.storage import cache
@@ -316,3 +316,181 @@ def test_source_info_exposes_stale_provenance():
     assert info.staleReason.startswith("UPSTREAM_UNAVAILABLE")
     assert info.refreshRequestId == "refresh-cid"
     assert info.oldestRetrievedAt == old
+
+
+
+def _complete_raw_cache(client, req, raw_payload, retrieved_at):
+    request_hash = req.request_hash(client.api_version)
+    coordinate_hash = volatility_coordinate_hash(req, client.api_version)
+    body = serialize_volatility_request(req)
+    response_hash = RawStore.payload_hash(raw_payload)
+    client._raw.save("implied-volatility", request_hash, raw_payload)
+    client._catalog.upsert(
+        request_hash=request_hash,
+        endpoint="implied-volatility",
+        api_version=client.api_version,
+        instrument=req.code,
+        start_date=req.start_date,
+        end_date=req.end_date,
+        request_json=__import__("json").dumps(body, sort_keys=True),
+        response_hash=response_hash,
+        retrieved_at=retrieved_at,
+        status="COMPLETED",
+        cache_policy="historical",
+        correlation_id=request_hash,
+        quality_status="OK",
+        coordinate_hash=coordinate_hash,
+    )
+    return request_hash
+
+
+def test_newer_wider_raw_cache_beats_older_exact_cache(tmp_path):
+    client = bare_client(tmp_path, history=False)
+    narrow = request("2026-02-01", "2026-03-01")
+    wide = request("2026-01-01", "2026-04-01")
+    now = datetime.now(UTC)
+    _complete_raw_cache(client, narrow, payload([("2026-02-15", .20)]), now - timedelta(hours=2))
+    wide_hash = _complete_raw_cache(
+        client,
+        wide,
+        payload([("2026-01-15", .19), ("2026-02-15", .25), ("2026-03-15", .23)]),
+        now - timedelta(hours=1),
+    )
+    chosen = client._best_cached_result(
+        narrow,
+        request_hash=narrow.request_hash(client.api_version),
+        coordinate_hash=volatility_coordinate_hash(narrow, client.api_version),
+        require_fresh=True,
+    )
+    assert chosen is not None
+    assert chosen.source_request_hash == wide_hash
+    assert chosen.cache_status == "cache"
+
+
+def test_cache_older_than_eight_hours_reaches_upstream(tmp_path):
+    client = bare_client(tmp_path, history=False)
+    req = request("2026-01-01", "2026-01-31")
+    _complete_raw_cache(
+        client,
+        req,
+        payload([("2026-01-15", .20)]),
+        datetime.now(UTC) - timedelta(hours=8, minutes=1),
+    )
+    calls = []
+    client._request_with_retry = lambda *_a, **_k: (
+        calls.append(1) or payload([("2026-01-15", .21)])
+    )
+    observations, result = client.get_implied_volatility(req)
+    assert calls == [1]
+    assert result.cache_status == "live"
+    assert observations[0].implied_vol == .21
+
+
+def test_delta_series_is_actually_archived_and_reused(tmp_path):
+    client = bare_client(tmp_path)
+    req = SlidingDeltaRequest(
+        code="US_QQQ",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 31),
+        low_delta_strike="p25.0",
+        high_delta_strike="p25.0",
+        low_maturity="3M",
+        high_maturity="3M",
+    )
+    delta_payload = [{
+        "date": "2026-01-15",
+        "code": "US_QQQ",
+        "maturityRule": "sliding",
+        "strikeRule": "delta",
+        "volatilityConvention": "bsVol",
+        "spot": 500.0,
+        "maturities": ["3M"],
+        "strikes": ["p25.0"],
+        "forwardCurve": [501.0],
+        "zcCurve": [0.99],
+        "matrix": [[0.27]],
+    }]
+    calls = []
+    client._request_with_retry = lambda *_a, **_k: calls.append(1) or delta_payload
+    first, _ = client.get_implied_volatility(req)
+    second, result = client.get_implied_volatility(req)
+    assert len(calls) == 1
+    assert first[0].implied_vol == second[0].implied_vol == .27
+    assert result.cache_status == "archive"
+
+
+def test_live_200_no_data_can_fall_back_to_stale_archive(tmp_path):
+    client = bare_client(tmp_path)
+    req = request("2026-01-01", "2026-01-31")
+    coord = volatility_coordinate_hash(req, client.api_version)
+    old = datetime.now(UTC) - timedelta(hours=9)
+    client._history.upsert_series(
+        coordinate_hash=coord,
+        request_hash="old",
+        start_date=req.start_date,
+        end_date=req.end_date,
+        retrieved_at=old,
+        response_hash="old",
+        correlation_id="old-cid",
+        observations=[obs("2026-01-15", .20)],
+        api_version=client.api_version,
+        coordinate_json="{}",
+    )
+    client._request_with_retry = lambda *_a, **_k: []
+    observations, result = client.get_implied_volatility(req)
+    assert observations[0].implied_vol == .20
+    assert result.cache_status == "stale"
+    assert result.stale_reason.startswith("NO_DATA")
+    assert result.refresh_correlation_id
+
+
+def test_history_coordinate_hash_remains_self_describing_after_cache_compaction(tmp_path):
+    client = bare_client(tmp_path)
+    req = request("2026-01-01", "2026-01-31")
+    client._request_with_retry = lambda *_a, **_k: payload([("2026-01-15", .20)])
+    client.get_implied_volatility(req)
+    coord = volatility_coordinate_hash(req, client.api_version)
+    metadata = client._history.coordinate_metadata(coord)
+    assert metadata is not None
+    assert metadata["api_version"] == client.api_version
+    wire = __import__("json").loads(metadata["coordinate_json"])
+    assert "startDate" not in wire and "endDate" not in wire
+    assert wire["code"] == "US_QQQ"
+    assert wire["lowStrike"] == wire["highStrike"] == "100_0"
+
+
+def test_expired_nonhistorical_relative_surface_cache_is_pruned(tmp_path):
+    client = bare_client(tmp_path)
+    surface = SlidingMoneynessRequest(
+        code="US_QQQ",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 31),
+        low_strike=95,
+        high_strike=105,
+        low_maturity="1M",
+        high_maturity="3M",
+    )
+    old_hash = _complete_raw_cache(
+        client,
+        surface,
+        payload([("2026-01-15", .20)]),
+        datetime.now(UTC) - timedelta(hours=9),
+    )
+    assert client._raw.exists("implied-volatility", old_hash)
+    client._prune_expired_request_files(datetime.now(UTC))
+    assert client._catalog.get(old_hash) is None
+    assert not client._raw.exists("implied-volatility", old_hash)
+
+
+def test_expired_unmigrated_exact_series_raw_is_retained_for_upgrade_safety(tmp_path):
+    client = bare_client(tmp_path)
+    req = request("2026-01-01", "2026-01-31")
+    old_hash = _complete_raw_cache(
+        client,
+        req,
+        payload([("2026-01-15", .20)]),
+        datetime.now(UTC) - timedelta(hours=9),
+    )
+    client._prune_expired_request_files(datetime.now(UTC))
+    assert client._catalog.get(old_hash) is not None
+    assert client._raw.exists("implied-volatility", old_hash)

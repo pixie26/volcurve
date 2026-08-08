@@ -45,7 +45,6 @@ from app.domain.disclosures import HTTP_MAX_RETRIES, HTTP_MAX_RETRY_AFTER_SECOND
 from app.domain.instruments import Instrument
 from app.domain.observations import StandardObservation
 from app.domain.requests import (
-    FixedStrikeRequest,
     ListedMaturityMoneynessRequest,
     SlidingDeltaRequest,
     SlidingMoneynessRequest,
@@ -287,9 +286,9 @@ class CortexClient:
                 and request.low_fixed_maturity is not None
                 and request.low_fixed_maturity == request.high_fixed_maturity
             )
-        # Absolute/fixed strikes can have very high cardinality and are deliberately
-        # short-cache only, regardless of whether the maturity rule is fixed or listed.
-        return not isinstance(request, FixedStrikeRequest) and False
+        # Absolute/fixed strikes and non-exact ranges can have high cardinality and are
+        # deliberately short-cache only.
+        return False
 
     def _history_store(self) -> HistoricalStore | None:
         # A few low-level tests intentionally build a client with __new__.  Production
@@ -349,6 +348,12 @@ class CortexClient:
         if history is None or result.source_request_hash != request_hash:
             return
         try:
+            wire = serialize_volatility_request(request)
+            coordinate_json = json.dumps(
+                {key: value for key, value in wire.items() if key not in {"startDate", "endDate"}},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
             history.upsert_series(
                 coordinate_hash=coordinate_hash,
                 request_hash=request_hash,
@@ -358,6 +363,8 @@ class CortexClient:
                 response_hash=RawStore.payload_hash(result.payload),
                 correlation_id=result.correlation_id,
                 observations=observations,
+                api_version=self.api_version,
+                coordinate_json=coordinate_json,
             )
         except Exception as exc:
             raise CortexError(ErrorCode.STORAGE_FAILED, "historical library 写入失败") from exc
@@ -407,17 +414,34 @@ class CortexClient:
                     return raw_fallback
             raise
 
-        canonical = self._canonicalize_implied_volatility(
-            request, request_hash, request_json, policy, result
-        )
         try:
-            observations = normalize_surface(canonical, request)
+            canonical = self._canonicalize_implied_volatility(
+                request, request_hash, request_json, policy, result
+            )
+            try:
+                observations = normalize_surface(canonical, request)
+            except CortexError as exc:
+                if exc.code != ErrorCode.NO_DATA:
+                    self._record_parse_failure(
+                        request, request_hash, request_json, policy, result, exc
+                    )
+                raise
+            observations = _within_requested_range(observations, request, result)
+            if not observations:
+                raise CortexError(ErrorCode.NO_DATA, "该日期区间内没有可用观测")
         except CortexError as exc:
-            self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
+            if (
+                eligible
+                and result.cache_status == "live"
+                and self._stale_fallback_allowed(exc)
+            ):
+                exc.correlation_id = result.correlation_id
+                archived = self._load_history_result(
+                    request, coordinate_hash, fresh_after=None, stale_error=exc
+                )
+                if archived is not None:
+                    return archived
             raise
-        observations = _within_requested_range(observations, request, result)
-        if not observations:
-            raise CortexError(ErrorCode.NO_DATA, "该日期区间内没有可用观测")
         self._finish_implied_volatility(
             request,
             request_hash,
@@ -722,6 +746,35 @@ class CortexClient:
             except Exception:
                 logger.warning("cache compaction failed request=%s", old_hash)
 
+    @staticmethod
+    def _wire_history_eligible(body: dict) -> bool:
+        strike_rule = body.get("strikeRule")
+        maturity_rule = body.get("maturityRule")
+        if strike_rule == "fixed":
+            return False
+        if strike_rule == "delta":
+            return bool(
+                body.get("lowDeltaStrike")
+                and body.get("lowDeltaStrike") == body.get("highDeltaStrike")
+                and body.get("lowMaturity")
+                and body.get("lowMaturity") == body.get("highMaturity")
+            )
+        if strike_rule not in {"relative_to_forward", "relative_to_spot_ref"}:
+            return False
+        if not body.get("lowStrike") or body.get("lowStrike") != body.get("highStrike"):
+            return False
+        if maturity_rule == "sliding":
+            return bool(
+                body.get("lowMaturity")
+                and body.get("lowMaturity") == body.get("highMaturity")
+            )
+        if maturity_rule in {"fixed", "listed"}:
+            return bool(
+                body.get("lowFixedMaturity")
+                and body.get("lowFixedMaturity") == body.get("highFixedMaturity")
+            )
+        return False
+
     def _prune_expired_request_files(self, now: datetime) -> None:
         cutoff = cache_policy_mod.freshness_cutoff(now)
         history = self._history_store()
@@ -730,9 +783,11 @@ class CortexClient:
         ):
             request_json = entry.get("request_json") or ""
             try:
-                strike_rule = json.loads(request_json).get("strikeRule")
+                wire_body = json.loads(request_json)
             except (TypeError, ValueError, json.JSONDecodeError):
-                strike_rule = None
+                # Unknown legacy metadata is kept rather than risking data loss.
+                continue
+            history_eligible = self._wire_history_eligible(wire_body)
             archived = False
             if (
                 history is not None
@@ -745,10 +800,10 @@ class CortexClient:
                     start_date=entry["start_date"],
                     end_date=entry["end_date"],
                 )
-            # Fixed/absolute strike universes are explicitly non-historical. Exact
-            # percentage/delta request files may also be dropped once point history covers
-            # them. Surface/range responses without durable history are retained for now.
-            if strike_rule != "fixed" and not archived:
+            # Every non-historical request is short-cache only.  Eligible exact percentage/
+            # delta raws are retained solely until their interval has been migrated into the
+            # point library, which protects upgrades from pre-Step-7 installations.
+            if history_eligible and not archived:
                 continue
             old_hash = entry["request_hash"]
             try:
@@ -770,7 +825,8 @@ class CortexClient:
         try:
             canonical = canonicalize_surface(result.payload)
         except CortexError as exc:
-            self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
+            if exc.code != ErrorCode.NO_DATA:
+                self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
             raise
 
         if self._mode != "fixture" and result.source_request_hash == request_hash:

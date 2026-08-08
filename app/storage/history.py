@@ -19,6 +19,16 @@ import duckdb
 
 from app.domain.observations import StandardObservation
 
+_COORDINATES_DDL = """
+CREATE TABLE IF NOT EXISTS historical_coordinates (
+    coordinate_hash VARCHAR PRIMARY KEY,
+    api_version     VARCHAR NOT NULL,
+    coordinate_json VARCHAR NOT NULL,
+    first_seen_at   TIMESTAMPTZ NOT NULL,
+    last_seen_at    TIMESTAMPTZ NOT NULL
+)
+"""
+
 _POINTS_DDL = """
 CREATE TABLE IF NOT EXISTS historical_points (
     coordinate_hash   VARCHAR NOT NULL,
@@ -124,6 +134,7 @@ class HistoricalStore:
         self._conn = duckdb.connect(str(db_path))
         self._lock = threading.Lock()
         with self._lock:
+            self._conn.execute(_COORDINATES_DDL)
             self._conn.execute(_POINTS_DDL)
             self._conn.execute(_COVERAGE_DDL)
             self._conn.execute(_REVISIONS_DDL)
@@ -139,11 +150,28 @@ class HistoricalStore:
         response_hash: str,
         correlation_id: str,
         observations: list[StandardObservation],
+        api_version: str = "unknown",
+        coordinate_json: str = "{}",
     ) -> None:
         incoming = {observation.date: observation for observation in observations}
         with self._lock:
             self._conn.execute("BEGIN TRANSACTION")
             try:
+                coordinate_row = self._conn.execute(
+                    "SELECT first_seen_at, last_seen_at FROM historical_coordinates "
+                    "WHERE coordinate_hash = ?",
+                    [coordinate_hash],
+                ).fetchone()
+                first_seen = coordinate_row[0] if coordinate_row is not None else retrieved_at
+                last_seen = (
+                    max(coordinate_row[1], retrieved_at)
+                    if coordinate_row is not None
+                    else retrieved_at
+                )
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO historical_coordinates VALUES (?, ?, ?, ?, ?)",
+                    [coordinate_hash, api_version, coordinate_json, first_seen, last_seen],
+                )
                 rows = self._conn.execute(
                     "SELECT observation_date, observation_json, market_fingerprint, "
                     "retrieved_at, response_hash FROM historical_points "
@@ -303,6 +331,23 @@ class HistoricalStore:
             newest_retrieved_at=max(retrieved),
             correlation_ids=correlation_ids,
         )
+
+
+    def coordinate_metadata(self, coordinate_hash: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT api_version, coordinate_json, first_seen_at, last_seen_at "
+                "FROM historical_coordinates WHERE coordinate_hash = ?",
+                [coordinate_hash],
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "api_version": row[0],
+            "coordinate_json": row[1],
+            "first_seen_at": row[2],
+            "last_seen_at": row[3],
+        }
 
     def revision_count(self, coordinate_hash: str | None = None) -> int:
         with self._lock:

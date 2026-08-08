@@ -95,7 +95,7 @@ Fixed 的含义也不是“任意日历日期都有理论插值”。OpenAPI 的
 - 所有 request cache 的 freshness 为滚动 **8 小时**；历史日期不再永久视为 fresh。超过 8 小时后，下一次使用会尝试重新向 Cortex 获取，以发现历史修订。
 - exact request 与 covering request 同时可用时，**retrieved_at 更新的 BNP 版本优先**；只有时间相同时才优先 exact / 更窄 payload。
 - Time Series 的长期历史库按 `coordinate × observation date` 保存 latest-known point，可把多次重叠成功请求拼接：新区间覆盖 overlap，未重叠的旧日期继续保留。
-- 长期历史库只收 **K/F 百分比、K/S 百分比与 Delta** 的精确单坐标序列；absolute/fixed strike（包括 listed strike discovery 的大 strike universe）只保留短期 request cache，不进入历史点库。
+- 长期历史库只收 **K/F 百分比、K/S 百分比与 Delta** 的精确单坐标序列；absolute/fixed strike（包括 listed strike discovery 的大 strike universe）以及非精确 range/surface 都只保留 8 小时 request cache，不进入历史点库。
 - 新版成功 response 若修改或删除旧 point，会写一条轻量 revision delta；日常图表使用 latest-known point，不保留整份旧大 payload 作为 revision archive。
 - 新版 request 完全覆盖同坐标旧 request 时，旧 raw/parquet/catalog cache 可安全删除；过期 exact-series raw 在历史点库已完整覆盖后也可清理。
 - refresh 因 timeout/429/5xx/`NO_DATA` 失败时，如果历史点库能完整覆盖请求，可显示 stale fallback；必须在图表上方红色标记 `STALE DATA`，并披露最近成功获取时间、刷新尝试时间和失败原因。400/401/403/schema/local-contract 错误不得用旧数据掩盖。
