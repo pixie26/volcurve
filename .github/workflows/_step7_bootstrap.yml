@@ -26,6 +26,9 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Fix bootstrap anchor
+        run: sed -i 's/## 当前已知 legacy UI 边界/## Bulk Maturity 当前语义/' scripts/_apply_step7.py
+
       - name: Apply Step 7
         run: python scripts/_apply_step7.py
 
