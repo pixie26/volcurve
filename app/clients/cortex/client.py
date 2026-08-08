@@ -58,6 +58,10 @@ _READ_TIMEOUT = 120.0
 _MAX_RETRIES = HTTP_MAX_RETRIES
 _BACKOFF_BASE = 0.5
 _MAX_RETRY_AFTER = float(HTTP_MAX_RETRY_AFTER_SECONDS)
+_MAX_CONCURRENT_UPSTREAM_REQUESTS = 4
+# Process-wide for the supported single-worker deployment. Every actual Cortex HTTP attempt
+# (including Playground and instruments) must take one permit; cache/fixture paths never do.
+_UPSTREAM_SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENT_UPSTREAM_REQUESTS)
 _FIXTURE_DIR = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
 
@@ -704,7 +708,7 @@ class CortexClient:
         while attempt <= _MAX_RETRIES:
             attempt += 1
             try:
-                return self._single_request(
+                return self._request_once_limited(
                     method, path, params=params, json_body=json_body, correlation_id=correlation_id
                 )
             except CortexError as exc:
@@ -721,6 +725,30 @@ class CortexClient:
                     continue
                 raise
         raise last_error or CortexError(ErrorCode.UPSTREAM_UNAVAILABLE, "上游调用失败")
+
+    def _request_once_limited(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict | None,
+        json_body: dict | None,
+        correlation_id: str,
+    ) -> list:
+        """Take one process-wide permit for exactly one real Cortex HTTP attempt.
+
+        Retries release the permit before backoff and re-enter the queue on the next
+        attempt. Cache hits and fixture responses never call this method, while the Raw
+        API Playground and instrument lookup share the same cap through _request_with_retry.
+        """
+        with _UPSTREAM_SEMAPHORE:
+            return self._single_request(
+                method,
+                path,
+                params=params,
+                json_body=json_body,
+                correlation_id=correlation_id,
+            )
 
     def _single_request(
         self,
