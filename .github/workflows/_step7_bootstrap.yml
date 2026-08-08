@@ -32,6 +32,9 @@ jobs:
       - name: Apply Step 7
         run: python scripts/_apply_step7.py
 
+      - name: Fix generated test closures
+        run: sed -i 's/lambda \*_a, \*\*_k:/lambda *_a, code=code, **_k:/g' tests/unit/test_historical_archive.py
+
       - name: Remove bootstrap files
         run: |
           rm scripts/_apply_step7.py
