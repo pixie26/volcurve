@@ -1,8 +1,19 @@
-"""Spread / ratio / percentile / z-score / correlation.
+"""Backend compare-response analytics: spread / ratio / percentile / z-score / correlation.
 
-Percentile and z-score default to the *entire selected history*
-(full-sample), per the agreed methodology. Null-safe: pairs with any
-missing side are dropped; nothing is zero-filled.
+Ownership note (7.5F)
+---------------------
+This module is intentionally still a backend implementation. ``AnalyticsEngine.run_compare``
+uses it to populate the public ``CompareSummary`` API contract consumed by presenters and
+non-Time-Series callers. It is therefore *not* duplicate dead code and must not be deleted
+just to make the repository single-language.
+
+The interactive Time Series workspace has a different boundary: its user-visible range
+statistics also have to work for browser-derived A-B/A+B/A/B series, so their canonical
+implementation is ``app/web/compare-core.js``. New Time Series statistics belong there and
+are execution-tested from Node against an independent Python oracle.
+
+Percentile and z-score here use the entire selected history (full-sample). Null-safe: pairs
+with any missing side are dropped; nothing is zero-filled.
 """
 
 from __future__ import annotations
