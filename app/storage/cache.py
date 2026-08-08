@@ -1,15 +1,18 @@
-"""Cache policy.
+"""Cache freshness policy.
 
-- Completed historical ranges (end_date < today): permanent cache.
-- Ranges touching today: short TTL, because the current session may update.
-- API version bump invalidates everything (version is part of the hash).
+All successful cached responses are reusable for eight rolling hours.  Historical
+volatility data is deliberately not treated as immutable because Cortex can revise
+history.  The long-lived, revision-aware time-series library is separate from this
+short request cache.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-INTRADAY_TTL = timedelta(hours=6)
+CACHE_TTL = timedelta(hours=8)
+# Compatibility name used by older tests/imports.
+INTRADAY_TTL = CACHE_TTL
 
 
 def cache_policy(end_date: date, today: date | None = None) -> str:
@@ -17,14 +20,18 @@ def cache_policy(end_date: date, today: date | None = None) -> str:
     return "historical" if end_date < today else "intraday"
 
 
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def freshness_cutoff(now: datetime | None = None) -> datetime:
+    current = _utc(now or datetime.now(UTC))
+    return current - CACHE_TTL
+
+
 def is_fresh(retrieved_at: datetime, policy: str, now: datetime | None = None) -> bool:
-    if policy == "historical":
-        return True
-    if retrieved_at.tzinfo is None:
-        # Existing DuckDB rows were written as naive UTC before the audit-time
-        # contract was tightened. Interpret them as UTC for compatibility.
-        retrieved_at = retrieved_at.replace(tzinfo=UTC)
-    now = now or datetime.now(UTC)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=UTC)
-    return (now - retrieved_at) < INTRADAY_TTL
+    # `policy` remains metadata (historical/intraday) for audit compatibility.  Both
+    # classes share the same rolling TTL so old catalog rows migrate automatically.
+    del policy
+    current = _utc(now or datetime.now(UTC))
+    return (current - _utc(retrieved_at)) < CACHE_TTL

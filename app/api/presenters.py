@@ -55,16 +55,36 @@ def _raw_percent(value: float | None) -> float | str | None:
 def _source_info(client, request: VolatilityRequest, fetch_results, warmup_from) -> SourceInfo:
     statuses = list(dict.fromkeys(result.cache_status for result in fetch_results))
     cache_status = statuses[0] if len(statuses) == 1 else "mixed"
-    request_ids = list(dict.fromkeys(result.correlation_id for result in fetch_results))
+    request_ids = []
+    for result in fetch_results:
+        request_ids.extend(result.source_request_ids or [result.correlation_id])
+    request_ids = list(dict.fromkeys(request_ids)) or ["historical-archive"]
+    oldest = min(
+        result.oldest_retrieved_at or result.retrieved_at for result in fetch_results
+    )
+    newest = max(
+        result.newest_retrieved_at or result.retrieved_at for result in fetch_results
+    )
+    refresh_times = [result.refresh_attempted_at for result in fetch_results if result.refresh_attempted_at]
+    refresh_ids = [result.refresh_correlation_id for result in fetch_results if result.refresh_correlation_id]
+    stale_reasons = list(
+        dict.fromkeys(result.stale_reason for result in fetch_results if result.stale_reason)
+    )
     return SourceInfo(
         provider="Cortex DataHub",
         apiVersion=client.api_version,
         instrumentCode=request.code,
-        retrievedAt=max(result.retrieved_at for result in fetch_results),
+        retrievedAt=newest,
         cacheStatus=cache_status,
         requestId=request_ids[0],
         requestIds=request_ids,
         warmupFrom=warmup_from,
+        isStale="stale" in statuses,
+        oldestRetrievedAt=oldest,
+        newestRetrievedAt=newest,
+        refreshAttemptedAt=max(refresh_times) if refresh_times else None,
+        refreshRequestId=refresh_ids[-1] if refresh_ids else None,
+        staleReason="; ".join(stale_reasons) if stale_reasons else None,
     )
 
 
@@ -85,9 +105,26 @@ def _fetch_activity(fetch_results) -> list[ActivityEvent]:
                 message="已加载脱敏离线 fixture；未调用 live API。",
             )
         )
-    if "hit" in statuses:
+    if "hit" in statuses or "cache" in statuses:
         events.append(
-            ActivityEvent(code="CACHE_HIT", stage="fetch", message="已使用校验通过的本地缓存。")
+            ActivityEvent(code="CACHE_HIT", stage="fetch", message="已使用校验通过的本地请求缓存。")
+        )
+    if "archive" in statuses:
+        events.append(
+            ActivityEvent(
+                code="HISTORICAL_ARCHIVE_HIT",
+                stage="fetch",
+                message="本地历史点库已完整覆盖请求；未调用 live API。",
+            )
+        )
+    if "stale" in statuses:
+        events.append(
+            ActivityEvent(
+                code="STALE_ARCHIVE_FALLBACK",
+                stage="fetch",
+                message="最新 Cortex 刷新失败；正在显示最近一次成功保存的本地历史数据。",
+                suggestedAction="数据已明确标记为 STALE；网络/上游恢复后重新刷新以确认最新值。",
+            )
         )
     if "live" in statuses:
         events.extend(
@@ -155,8 +192,8 @@ def _request_audit(request: VolatilityRequest, fetch_results) -> RequestAudit:
         entries.append(
             UpstreamRequestAudit(
                 disposition=disposition,
-                sentToUpstream=disposition == "live",
-                correlationId=result.correlation_id,
+                sentToUpstream=disposition in {"live", "stale"},
+                correlationId=(result.refresh_correlation_id if disposition == "stale" and result.refresh_correlation_id else result.correlation_id),
                 body=getattr(result, "request_body", None) or user_body,
             )
         )

@@ -90,6 +90,17 @@ Fixed 的含义也不是“任意日历日期都有理论插值”。OpenAPI 的
 - 相同 request hash 的并发请求 single-flight 合并；不同真实 Cortex HTTP attempts 进程内最多 4 个同时执行；
 - cache hit / fixture 不占 upstream 并发 slot。
 
+## Historical cache / library 语义（Step 7）
+
+- 所有 request cache 的 freshness 为滚动 **8 小时**；历史日期不再永久视为 fresh。超过 8 小时后，下一次使用会尝试重新向 Cortex 获取，以发现历史修订。
+- exact request 与 covering request 同时可用时，**retrieved_at 更新的 BNP 版本优先**；只有时间相同时才优先 exact / 更窄 payload。
+- Time Series 的长期历史库按 `coordinate × observation date` 保存 latest-known point，可把多次重叠成功请求拼接：新区间覆盖 overlap，未重叠的旧日期继续保留。
+- 长期历史库只收 **K/F 百分比、K/S 百分比与 Delta** 的精确单坐标序列；absolute/fixed strike（包括 listed strike discovery 的大 strike universe）以及非精确 range/surface 都只保留 8 小时 request cache，不进入历史点库。
+- 新版成功 response 若修改或删除旧 point，会写一条轻量 revision delta；日常图表使用 latest-known point，不保留整份旧大 payload 作为 revision archive。
+- 新版 request 完全覆盖同坐标旧 request 时，旧 raw/parquet/catalog cache 可安全删除；过期 exact-series raw 在历史点库已完整覆盖后也可清理。
+- refresh 因 timeout/429/5xx/`NO_DATA` 失败时，如果历史点库能完整覆盖请求，可显示 stale fallback；必须在图表上方红色标记 `STALE DATA`，并披露最近成功获取时间、刷新尝试时间和失败原因。400/401/403/schema/local-contract 错误不得用旧数据掩盖。
+- Historical point stitching 的语义是“每个 observation date 的 latest-known BNP value”，不是单一 as-of snapshot；当前阶段不实现 mixed-version 回测快照。
+
 ## Bulk Maturity 当前语义
 
 Bulk Maturity **有意支持** `Sliding tenor` 与 `Fixed date` 两种目标；这不改变主 indicator builder 仍以 Sliding + Listed 为普通新建入口的产品契约。

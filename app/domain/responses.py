@@ -104,6 +104,12 @@ class SourceInfo(BaseModel):
     requestId: str
     requestIds: list[str]
     warmupFrom: date
+    isStale: bool = False
+    oldestRetrievedAt: datetime | None = None
+    newestRetrievedAt: datetime | None = None
+    refreshAttemptedAt: datetime | None = None
+    refreshRequestId: str | None = None
+    staleReason: str | None = None
 
 
 class DataQualitySummary(BaseModel):

@@ -52,6 +52,7 @@ class Settings:
         self.raw_dir = DATA_DIR / "raw"
         self.normalized_dir = DATA_DIR / "normalized"
         self.duckdb_path = DATA_DIR / "catalog.duckdb"
+        self.history_duckdb_path = DATA_DIR / "history.duckdb"
 
     @property
     def credentials_configured(self) -> bool:

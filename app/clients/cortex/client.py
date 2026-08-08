@@ -5,8 +5,9 @@ Responsibilities:
   backoff, bounded retries, per-request correlation ID;
 - no retry on 400 / 403 / schema-invalid; 401 triggers one token refresh
   and one retry;
-- persistent cache: raw store (authoritative) + DuckDB catalog index;
-  historical ranges are permanent, intraday ranges have a short TTL;
+- short request cache: verified raw responses are reusable for eight hours;
+- revision-aware historical library: exact percentage/delta series are stitched by date,
+  while absolute/listed strike universes remain short-lived cache only;
 - fixture mode (CORTEX_MODE=fixture): serve sanitized fixtures instead of
   calling BNP, so the app and tests run offline.
 """
@@ -43,11 +44,17 @@ from app.config import Settings
 from app.domain.disclosures import HTTP_MAX_RETRIES, HTTP_MAX_RETRY_AFTER_SECONDS
 from app.domain.instruments import Instrument
 from app.domain.observations import StandardObservation
-from app.domain.requests import VolatilityRequest
+from app.domain.requests import (
+    ListedMaturityMoneynessRequest,
+    SlidingDeltaRequest,
+    SlidingMoneynessRequest,
+    VolatilityRequest,
+)
 from app.domain.surfaces import StandardSurfaceObservation
 from app.security.redaction import redact, register_secret
 from app.storage import cache as cache_policy_mod
 from app.storage.catalog import Catalog
+from app.storage.history import HistoricalStore
 from app.storage.normalized_store import NormalizedStore
 from app.storage.raw_store import RawStore
 
@@ -68,12 +75,19 @@ _FIXTURE_DIR = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 @dataclass
 class FetchResult:
     payload: list
-    # "live" (fetched now) | "hit" (exact-range cache) | "cache" (a wider stored range for
-    # the same coordinate answered this one) | "fixture"
+    # live | hit (exact raw cache) | cache (covering raw cache) | archive (stitched point
+    # history) | stale (archive/raw fallback after a failed refresh) | fixture.
     cache_status: str
     correlation_id: str
     retrieved_at: datetime
     request_body: dict | None = None
+    source_request_hash: str | None = None
+    oldest_retrieved_at: datetime | None = None
+    newest_retrieved_at: datetime | None = None
+    source_request_ids: list[str] | None = None
+    stale_reason: str | None = None
+    refresh_attempted_at: datetime | None = None
+    refresh_correlation_id: str | None = None
 
 
 def load_api_version(project_root: Path) -> str:
@@ -156,6 +170,7 @@ class CortexClient:
         self._catalog = catalog or Catalog(settings.duckdb_path)
         self._raw = raw_store or RawStore(settings.raw_dir)
         self._normalized = normalized_store or NormalizedStore(settings.normalized_dir)
+        self._history = HistoricalStore(settings.history_duckdb_path)
         # One entry per in-flight request hash: concurrent identical requests wait for the
         # first instead of each making the same upstream call.
         self._inflight: dict[str, _InflightFetch] = {}
@@ -202,7 +217,7 @@ class CortexClient:
                     instrument_type,
                     retrieved_at=retrieved_at,
                 )
-                result = FetchResult(data, "live", request_hash, retrieved_at)
+                result = FetchResult(data, "live", request_hash, retrieved_at, source_request_hash=request_hash)
 
         try:
             instruments = [Instrument.model_validate(item) for item in data]
@@ -250,21 +265,182 @@ class CortexClient:
             )
         return instruments, result
 
+    @staticmethod
+    def _history_eligible(request: VolatilityRequest) -> bool:
+        """Long-lived history is only for exact percentage-moneyness or delta series."""
+        if isinstance(request, SlidingMoneynessRequest):
+            return (
+                request.low_strike == request.high_strike
+                and request.low_maturity == request.high_maturity
+            )
+        if isinstance(request, SlidingDeltaRequest):
+            return (
+                request.low_delta_strike is not None
+                and request.low_delta_strike == request.high_delta_strike
+                and request.low_maturity is not None
+                and request.low_maturity == request.high_maturity
+            )
+        if isinstance(request, ListedMaturityMoneynessRequest):
+            return (
+                request.low_strike == request.high_strike
+                and request.low_fixed_maturity is not None
+                and request.low_fixed_maturity == request.high_fixed_maturity
+            )
+        # Absolute/fixed strikes and non-exact ranges can have high cardinality and are
+        # deliberately short-cache only.
+        return False
+
+    def _history_store(self) -> HistoricalStore | None:
+        # A few low-level tests intentionally build a client with __new__.  Production
+        # clients always own the store, while those tests can opt in explicitly.
+        return getattr(self, "_history", None)
+
+    def _load_history_result(
+        self,
+        request: VolatilityRequest,
+        coordinate_hash: str,
+        *,
+        fresh_after: datetime | None,
+        stale_error: CortexError | None = None,
+    ) -> tuple[list[StandardObservation], FetchResult] | None:
+        history = self._history_store()
+        if history is None:
+            return None
+        loaded = history.load_series(
+            coordinate_hash=coordinate_hash,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            fresh_after=fresh_after,
+        )
+        if loaded is None:
+            return None
+        stale = stale_error is not None
+        source_ids = loaded.correlation_ids or ["historical-archive"]
+        refresh_id = getattr(stale_error, "correlation_id", None) if stale_error else None
+        result = FetchResult(
+            payload=[],
+            cache_status="stale" if stale else "archive",
+            correlation_id=source_ids[0],
+            retrieved_at=loaded.newest_retrieved_at,
+            request_body=serialize_volatility_request(request),
+            source_request_hash=None,
+            oldest_retrieved_at=loaded.oldest_retrieved_at,
+            newest_retrieved_at=loaded.newest_retrieved_at,
+            source_request_ids=source_ids,
+            stale_reason=(
+                f"{stale_error.code.value}: {stale_error.message}" if stale_error else None
+            ),
+            refresh_attempted_at=datetime.now(UTC) if stale else None,
+            refresh_correlation_id=refresh_id,
+        )
+        return loaded.observations, result
+
+    def _archive_series(
+        self,
+        request: VolatilityRequest,
+        *,
+        request_hash: str,
+        coordinate_hash: str,
+        result: FetchResult,
+        observations: list[StandardObservation],
+    ) -> None:
+        history = self._history_store()
+        if history is None or result.source_request_hash != request_hash:
+            return
+        try:
+            wire = serialize_volatility_request(request)
+            coordinate_json = json.dumps(
+                {key: value for key, value in wire.items() if key not in {"startDate", "endDate"}},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            history.upsert_series(
+                coordinate_hash=coordinate_hash,
+                request_hash=request_hash,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                retrieved_at=result.retrieved_at,
+                response_hash=RawStore.payload_hash(result.payload),
+                correlation_id=result.correlation_id,
+                observations=observations,
+                api_version=self.api_version,
+                coordinate_json=coordinate_json,
+            )
+        except Exception as exc:
+            raise CortexError(ErrorCode.STORAGE_FAILED, "historical library 写入失败") from exc
+
+    @staticmethod
+    def _stale_fallback_allowed(exc: CortexError) -> bool:
+        return exc.code in {
+            ErrorCode.UPSTREAM_RATE_LIMITED,
+            ErrorCode.UPSTREAM_UNAVAILABLE,
+            ErrorCode.NO_DATA,
+        }
+
     def get_implied_volatility(
         self, request: VolatilityRequest, *, force_refresh: bool = False
     ) -> tuple[list[StandardObservation], FetchResult]:
-        request_hash, request_json, policy, result = self._fetch_implied_volatility(
-            request, force_refresh=force_refresh
-        )
-        canonical = self._canonicalize_implied_volatility(
-            request, request_hash, request_json, policy, result
-        )
+        request_hash = volatility_request_hash(request, self.api_version)
+        coordinate_hash = volatility_coordinate_hash(request, self.api_version)
+        eligible = self._mode != "fixture" and self._history_eligible(request)
+
+        if eligible and not force_refresh:
+            archived = self._load_history_result(
+                request,
+                coordinate_hash,
+                fresh_after=cache_policy_mod.freshness_cutoff(),
+            )
+            if archived is not None:
+                return archived
+
         try:
-            observations = _within_requested_range(
-                normalize_surface(canonical, request), request, result
+            request_hash, request_json, policy, result = self._fetch_implied_volatility(
+                request, force_refresh=force_refresh
             )
         except CortexError as exc:
-            self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
+            if eligible and self._stale_fallback_allowed(exc):
+                archived = self._load_history_result(
+                    request, coordinate_hash, fresh_after=None, stale_error=exc
+                )
+                if archived is not None:
+                    return archived
+                raw_fallback = self._load_stale_raw_series(
+                    request,
+                    request_hash=request_hash,
+                    coordinate_hash=coordinate_hash,
+                    stale_error=exc,
+                )
+                if raw_fallback is not None:
+                    return raw_fallback
+            raise
+
+        try:
+            canonical = self._canonicalize_implied_volatility(
+                request, request_hash, request_json, policy, result
+            )
+            try:
+                observations = normalize_surface(canonical, request)
+            except CortexError as exc:
+                if exc.code != ErrorCode.NO_DATA:
+                    self._record_parse_failure(
+                        request, request_hash, request_json, policy, result, exc
+                    )
+                raise
+            observations = _within_requested_range(observations, request, result)
+            if not observations:
+                raise CortexError(ErrorCode.NO_DATA, "该日期区间内没有可用观测")
+        except CortexError as exc:
+            if (
+                eligible
+                and result.cache_status == "live"
+                and self._stale_fallback_allowed(exc)
+            ):
+                exc.correlation_id = result.correlation_id
+                archived = self._load_history_result(
+                    request, coordinate_hash, fresh_after=None, stale_error=exc
+                )
+                if archived is not None:
+                    return archived
             raise
         self._finish_implied_volatility(
             request,
@@ -275,6 +451,22 @@ class CortexClient:
             observations,
             surface=False,
         )
+        if eligible and result.cache_status in {"live", "hit"}:
+            self._archive_series(
+                request,
+                request_hash=request_hash,
+                coordinate_hash=coordinate_hash,
+                result=result,
+                observations=observations,
+            )
+            if result.cache_status == "live":
+                self._compact_request_cache(
+                    request,
+                    request_hash=request_hash,
+                    coordinate_hash=coordinate_hash,
+                    retrieved_at=result.retrieved_at,
+                )
+                self._prune_expired_request_files(result.retrieved_at)
         return observations, result
 
     def get_implied_volatility_surface(
@@ -288,12 +480,13 @@ class CortexClient:
             request, request_hash, request_json, policy, result
         )
         try:
-            observations = _within_requested_range(
-                normalize_surface_snapshots(canonical, request), request, result
-            )
+            observations = normalize_surface_snapshots(canonical, request)
         except CortexError as exc:
             self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
             raise
+        observations = _within_requested_range(observations, request, result)
+        if not observations:
+            raise CortexError(ErrorCode.NO_DATA, "该日期区间内没有可用 surface 观测")
         self._finish_implied_volatility(
             request,
             request_hash,
@@ -303,6 +496,8 @@ class CortexClient:
             observations,
             surface=True,
         )
+        if result.cache_status == "live":
+            self._prune_expired_request_files(result.retrieved_at)
         return observations, result
 
     def _fetch_implied_volatility(
@@ -319,9 +514,12 @@ class CortexClient:
         else:
             result = None
             if not force_refresh:
-                result = self._try_cache("implied-volatility", request_hash)
-                if result is None:
-                    result = self._try_covering_cache(request, coordinate_hash)
+                result = self._best_cached_result(
+                    request,
+                    request_hash=request_hash,
+                    coordinate_hash=coordinate_hash,
+                    require_fresh=True,
+                )
             if result is None:
                 result = self._fetch_and_store(
                     request,
@@ -362,12 +560,16 @@ class CortexClient:
                     # asked for a forced refresh, since that payload is seconds old.
                     return state.result
                 correlation_id = uuid.uuid4().hex[:12]
-                payload = self._request_with_retry(
-                    "POST",
-                    "/v1/implied-volatility",
-                    json_body=wire_body,
-                    correlation_id=correlation_id,
-                )
+                try:
+                    payload = self._request_with_retry(
+                        "POST",
+                        "/v1/implied-volatility",
+                        json_body=wire_body,
+                        correlation_id=correlation_id,
+                    )
+                except CortexError as exc:
+                    exc.correlation_id = correlation_id
+                    raise
                 retrieved_at = datetime.now(UTC)
                 self._persist_fetched(
                     "implied-volatility",
@@ -381,7 +583,13 @@ class CortexClient:
                     retrieved_at=retrieved_at,
                     coordinate_hash=coordinate_hash,
                 )
-                state.result = FetchResult(payload, "live", correlation_id, retrieved_at)
+                state.result = FetchResult(
+                    payload,
+                    "live",
+                    correlation_id,
+                    retrieved_at,
+                    source_request_hash=request_hash,
+                )
                 return state.result
         finally:
             self._leave_inflight(request_hash)
@@ -404,16 +612,35 @@ class CortexClient:
             if state.waiters <= 0:
                 del self._inflight[request_hash]
 
-    def _try_covering_cache(
-        self, request: VolatilityRequest, coordinate_hash: str
+    def _best_cached_result(
+        self,
+        request: VolatilityRequest,
+        *,
+        request_hash: str,
+        coordinate_hash: str,
+        require_fresh: bool,
     ) -> FetchResult | None:
-        """Serve a narrower window from a stored wider one for the same coordinate.
+        exact = self._try_cache(
+            "implied-volatility", request_hash, require_fresh=require_fresh
+        )
+        covering = self._try_covering_cache(
+            request, coordinate_hash, require_fresh=require_fresh
+        )
+        if exact is None:
+            return covering
+        if covering is None:
+            return exact
+        # Same timestamp => exact is cheaper to parse. Otherwise the newest BNP version
+        # wins even when it came from a wider range.
+        return covering if covering.retrieved_at > exact.retrieved_at else exact
 
-        Only the date range may differ — the coordinate hash pins the instrument, rules,
-        convention, layout and API version — and the stored entry must still be fresh
-        under its own policy, so this widens what a cache entry can answer without
-        extending how long anything is trusted.
-        """
+    def _try_covering_cache(
+        self,
+        request: VolatilityRequest,
+        coordinate_hash: str,
+        *,
+        require_fresh: bool = True,
+    ) -> FetchResult | None:
         entry = self._catalog.find_covering(
             coordinate_hash=coordinate_hash,
             endpoint="implied-volatility",
@@ -422,15 +649,169 @@ class CortexClient:
         )
         if entry is None:
             return None
-        if not cache_policy_mod.is_fresh(entry["retrieved_at"], entry["cache_policy"]):
+        if require_fresh and not cache_policy_mod.is_fresh(
+            entry["retrieved_at"], entry["cache_policy"]
+        ):
             return None
         try:
             payload = self._raw.load("implied-volatility", entry["request_hash"])
         except (OSError, EOFError, ValueError, json.JSONDecodeError):
             return None
-        if payload is None:
+        if payload is None or RawStore.payload_hash(payload) != entry["response_hash"]:
             return None
-        return FetchResult(payload, "cache", entry["request_hash"], entry["retrieved_at"])
+        return FetchResult(
+            payload,
+            "cache",
+            entry["correlation_id"] or entry["request_hash"],
+            entry["retrieved_at"],
+            source_request_hash=entry["request_hash"],
+        )
+
+    def _load_stale_raw_series(
+        self,
+        request: VolatilityRequest,
+        *,
+        request_hash: str,
+        coordinate_hash: str,
+        stale_error: CortexError,
+    ) -> tuple[list[StandardObservation], FetchResult] | None:
+        cached = self._best_cached_result(
+            request,
+            request_hash=request_hash,
+            coordinate_hash=coordinate_hash,
+            require_fresh=False,
+        )
+        if cached is None:
+            return None
+        try:
+            canonical = canonicalize_surface(cached.payload)
+            observations = normalize_surface(canonical, request)
+        except CortexError:
+            return None
+        observations = _within_requested_range(observations, request, cached)
+        if not observations:
+            return None
+        source_ids = [cached.correlation_id]
+        result = FetchResult(
+            payload=cached.payload,
+            cache_status="stale",
+            correlation_id=cached.correlation_id,
+            retrieved_at=cached.retrieved_at,
+            request_body=serialize_volatility_request(request),
+            source_request_hash=cached.source_request_hash,
+            oldest_retrieved_at=cached.retrieved_at,
+            newest_retrieved_at=cached.retrieved_at,
+            source_request_ids=source_ids,
+            stale_reason=f"{stale_error.code.value}: {stale_error.message}",
+            refresh_attempted_at=datetime.now(UTC),
+            refresh_correlation_id=getattr(stale_error, "correlation_id", None),
+        )
+        # Backfill the point library from an exact old request when upgrading an existing
+        # installation.  Covering raw responses keep their original range metadata, so do
+        # not invent a new coverage interval for the narrower request.
+        if cached.source_request_hash == request_hash:
+            try:
+                self._archive_series(
+                    request,
+                    request_hash=request_hash,
+                    coordinate_hash=coordinate_hash,
+                    result=cached,
+                    observations=observations,
+                )
+            except CortexError:
+                pass
+        return observations, result
+
+    def _compact_request_cache(
+        self,
+        request: VolatilityRequest,
+        *,
+        request_hash: str,
+        coordinate_hash: str,
+        retrieved_at: datetime,
+    ) -> None:
+        superseded = self._catalog.find_superseded_requests(
+            coordinate_hash=coordinate_hash,
+            endpoint="implied-volatility",
+            start_date=request.start_date,
+            end_date=request.end_date,
+            retrieved_at=retrieved_at,
+            keep_request_hash=request_hash,
+        )
+        for old_hash in superseded:
+            try:
+                self._raw.delete("implied-volatility", old_hash)
+                self._normalized.delete_request(old_hash)
+                self._catalog.delete_request(old_hash)
+            except Exception:
+                logger.warning("cache compaction failed request=%s", old_hash)
+
+    @staticmethod
+    def _wire_history_eligible(body: dict) -> bool:
+        strike_rule = body.get("strikeRule")
+        maturity_rule = body.get("maturityRule")
+        if strike_rule == "fixed":
+            return False
+        if strike_rule == "delta":
+            return bool(
+                body.get("lowDeltaStrike")
+                and body.get("lowDeltaStrike") == body.get("highDeltaStrike")
+                and body.get("lowMaturity")
+                and body.get("lowMaturity") == body.get("highMaturity")
+            )
+        if strike_rule not in {"relative_to_forward", "relative_to_spot_ref"}:
+            return False
+        if not body.get("lowStrike") or body.get("lowStrike") != body.get("highStrike"):
+            return False
+        if maturity_rule == "sliding":
+            return bool(
+                body.get("lowMaturity")
+                and body.get("lowMaturity") == body.get("highMaturity")
+            )
+        if maturity_rule in {"fixed", "listed"}:
+            return bool(
+                body.get("lowFixedMaturity")
+                and body.get("lowFixedMaturity") == body.get("highFixedMaturity")
+            )
+        return False
+
+    def _prune_expired_request_files(self, now: datetime) -> None:
+        cutoff = cache_policy_mod.freshness_cutoff(now)
+        history = self._history_store()
+        for entry in self._catalog.list_expired_requests(
+            endpoint="implied-volatility", cutoff=cutoff
+        ):
+            request_json = entry.get("request_json") or ""
+            try:
+                wire_body = json.loads(request_json)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                # Unknown legacy metadata is kept rather than risking data loss.
+                continue
+            history_eligible = self._wire_history_eligible(wire_body)
+            archived = False
+            if (
+                history is not None
+                and entry.get("coordinate_hash")
+                and entry.get("start_date") is not None
+                and entry.get("end_date") is not None
+            ):
+                archived = history.has_coverage(
+                    coordinate_hash=entry["coordinate_hash"],
+                    start_date=entry["start_date"],
+                    end_date=entry["end_date"],
+                )
+            # Every non-historical request is short-cache only.  Eligible exact percentage/
+            # delta raws are retained solely until their interval has been migrated into the
+            # point library, which protects upgrades from pre-Step-7 installations.
+            if history_eligible and not archived:
+                continue
+            old_hash = entry["request_hash"]
+            try:
+                self._raw.delete("implied-volatility", old_hash)
+                self._normalized.delete_request(old_hash)
+                self._catalog.delete_request(old_hash)
+            except Exception:
+                logger.warning("expired cache cleanup failed request=%s", old_hash)
 
     def _canonicalize_implied_volatility(
         self,
@@ -444,10 +825,11 @@ class CortexClient:
         try:
             canonical = canonicalize_surface(result.payload)
         except CortexError as exc:
-            self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
+            if exc.code != ErrorCode.NO_DATA:
+                self._record_parse_failure(request, request_hash, request_json, policy, result, exc)
             raise
 
-        if self._mode != "fixture":
+        if self._mode != "fixture" and result.source_request_hash == request_hash:
             self._record_state(
                 request_hash=request_hash,
                 endpoint="implied-volatility",
@@ -472,7 +854,7 @@ class CortexClient:
         result: FetchResult,
         exc: CortexError,
     ) -> None:
-        if self._mode == "fixture":
+        if self._mode == "fixture" or result.source_request_hash != request_hash:
             return
         state = (
             "INVALID_SCHEMA"
@@ -506,7 +888,7 @@ class CortexClient:
     ) -> None:
         response_hash = RawStore.payload_hash(result.payload)
 
-        if self._mode != "fixture":
+        if self._mode != "fixture" and result.source_request_hash == request_hash:
             self._record_state(
                 request_hash=request_hash,
                 endpoint="implied-volatility",
@@ -520,7 +902,7 @@ class CortexClient:
                 response_hash=response_hash,
             )
 
-        if self._mode != "fixture":
+        if self._mode != "fixture" and result.source_request_hash == request_hash:
             try:
                 if surface:
                     self._normalized.save_implied_vol_surface(request_hash, observations)
@@ -553,7 +935,7 @@ class CortexClient:
             ):
                 quality = "WARNINGS"
                 break
-        if self._mode != "fixture":
+        if self._mode != "fixture" and result.source_request_hash == request_hash:
             self._record_state(
                 request_hash=request_hash,
                 endpoint="implied-volatility",
@@ -574,11 +956,15 @@ class CortexClient:
 
     # ----------------------------------------------------------------- cache
 
-    def _try_cache(self, endpoint: str, request_hash: str) -> FetchResult | None:
+    def _try_cache(
+        self, endpoint: str, request_hash: str, *, require_fresh: bool = True
+    ) -> FetchResult | None:
         entry = self._catalog.get(request_hash)
         if entry is None or str(entry["status"]).upper() != "COMPLETED":
             return None
-        if not cache_policy_mod.is_fresh(entry["retrieved_at"], entry["cache_policy"]):
+        if require_fresh and not cache_policy_mod.is_fresh(
+            entry["retrieved_at"], entry["cache_policy"]
+        ):
             return None
         try:
             payload = self._raw.load(endpoint, request_hash)
@@ -590,7 +976,13 @@ class CortexClient:
         if RawStore.payload_hash(payload) != entry["response_hash"]:
             self._mark_corrupted_cache(entry)
             return None
-        return FetchResult(payload, "hit", entry["correlation_id"], entry["retrieved_at"])
+        return FetchResult(
+            payload,
+            "hit",
+            entry["correlation_id"],
+            entry["retrieved_at"],
+            source_request_hash=request_hash,
+        )
 
     def _mark_corrupted_cache(self, entry: dict) -> None:
         self._record_state(

@@ -37,7 +37,9 @@ def execute_compare_query(
         if exc.code in {ErrorCode.AUTHENTICATION_FAILED, ErrorCode.UPSTREAM_UNAVAILABLE}:
             mark_connectivity(False)
         raise
-    if any(result.cache_status == "live" for result in execution.load.fetch_results):
+    if any(result.cache_status == "stale" for result in execution.load.fetch_results):
+        mark_connectivity(False)
+    elif any(result.cache_status == "live" for result in execution.load.fetch_results):
         mark_connectivity(True)
     return build_compare_response(
         request_id=request_id,

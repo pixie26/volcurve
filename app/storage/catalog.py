@@ -140,17 +140,65 @@ class Catalog:
         """
         with self._lock:
             row = self._conn.execute(
-                "SELECT request_hash, retrieved_at, cache_policy, start_date, end_date"
+                "SELECT request_hash, retrieved_at, cache_policy, start_date, end_date, "
+                "response_hash, correlation_id"
                 " FROM requests"
                 " WHERE coordinate_hash = ? AND endpoint = ? AND status = 'COMPLETED'"
                 "   AND start_date <= ? AND end_date >= ?"
-                " ORDER BY (end_date - start_date) ASC LIMIT 1",
-                [coordinate_hash, endpoint, start_date, end_date],
+                " ORDER BY retrieved_at DESC, "
+                "CASE WHEN start_date = ? AND end_date = ? THEN 0 ELSE 1 END, "
+                "(end_date - start_date) ASC LIMIT 1",
+                [coordinate_hash, endpoint, start_date, end_date, start_date, end_date],
             ).fetchone()
         if row is None:
             return None
-        keys = ("request_hash", "retrieved_at", "cache_policy", "start_date", "end_date")
+        keys = (
+            "request_hash", "retrieved_at", "cache_policy", "start_date", "end_date",
+            "response_hash", "correlation_id",
+        )
         return dict(zip(keys, row, strict=True))
+
+
+    def find_superseded_requests(
+        self,
+        *,
+        coordinate_hash: str,
+        endpoint: str,
+        start_date: date,
+        end_date: date,
+        retrieved_at: datetime,
+        keep_request_hash: str,
+    ) -> list[str]:
+        """Older completed request files fully contained by a newer response."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT request_hash FROM requests WHERE coordinate_hash = ? AND endpoint = ? "
+                "AND status = 'COMPLETED' AND request_hash <> ? "
+                "AND start_date >= ? AND end_date <= ? AND retrieved_at <= ?",
+                [
+                    coordinate_hash,
+                    endpoint,
+                    keep_request_hash,
+                    start_date,
+                    end_date,
+                    retrieved_at,
+                ],
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def list_expired_requests(self, *, endpoint: str, cutoff: datetime) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT request_hash, coordinate_hash, start_date, end_date, request_json "
+                "FROM requests WHERE endpoint = ? AND status = 'COMPLETED' AND retrieved_at < ?",
+                [endpoint, cutoff],
+            ).fetchall()
+        keys = ("request_hash", "coordinate_hash", "start_date", "end_date", "request_json")
+        return [dict(zip(keys, row, strict=True)) for row in rows]
+
+    def delete_request(self, request_hash: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM requests WHERE request_hash = ?", [request_hash])
 
     def close(self) -> None:
         with self._lock:
