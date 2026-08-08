@@ -29,6 +29,20 @@ jobs:
       - name: Apply review fixes
         run: python scripts/_step7_review_fix.py
 
+      - name: Fix reviewed import lint
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("app/clients/cortex/client.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "from app.domain.requests import (\n    FixedStrikeRequest,\n    ListedMaturityMoneynessRequest,",
+              "from app.domain.requests import (\n    ListedMaturityMoneynessRequest,",
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+
       - name: Remove review bootstrap files
         run: |
           rm scripts/_step7_review_fix.py
