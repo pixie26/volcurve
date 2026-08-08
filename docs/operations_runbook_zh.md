@@ -1,7 +1,7 @@
 # VolCurve 部署与运维 Runbook
 
 初版日期：2026-08-07  
-当前修订：2026-08-08
+当前修订：2026-08-09
 
 ## 部署约束
 
@@ -36,6 +36,22 @@ docker run --rm -p 127.0.0.1:8000:8000 `
 
 不要把服务直接绑定公网。若由反向代理提供内网访问，只向代理所在网络开放容器端口。
 
+## 前端静态资产边界
+
+Frontend 7.5 后 Time Series 由多个 production JS 模块组成：
+
+```text
+compare-core.js       # pure statistics / derived / signatures
+compare-workspace.js  # workspace / board / bulk / persistence
+compare-request.js    # request / fetch / series resolution
+compare-render.js     # DOM / Plotly / detail / statistics render
+compare-builder.js    # thin bootstrap/controller
+```
+
+部署时必须把这些文件与 `app.js`、`styles.css`、离线 Plotly bundle 作为同一版本静态资产发布。不要只复制旧的 `compare-builder.js` 覆盖生产目录；那会造成 HTML/controller 与 split modules 版本错配。
+
+浏览器 boot smoke / Playwright 会检查 runtime exception；Python Web static tests 会检查关键 offline asset contract。详细前端边界见 [`frontend_testing_zh.md`](frontend_testing_zh.md)。
+
 ## 数据目录与 Step 7 lifecycle
 
 `/app/data` 当前包含两类不同的数据资产：
@@ -55,7 +71,7 @@ docker run --rm -p 127.0.0.1:8000:8000 `
 
 Raw API Playground 在 live mode 下直接复用服务器 Cortex authentication / timeout / retry / proxy / TLS，故意绕过应用 cache、domain normalization、analytics 与 normalized storage，用于验证原始 Cortex request/response。
 
-2026-08-08 当前决策：**暂不增加独立 deployment flag**，前提是服务只面向小型可信内部团队且不直接暴露公网。
+当前决策：**暂不增加独立 deployment flag**，前提是服务只面向小型可信内部团队且不直接暴露公网。
 
 出现以下任一情况时，必须重新评估 `CORTEX_PLAYGROUND_ENABLED`、route-level auth 或更严格的 proxy ACL：
 
@@ -81,20 +97,49 @@ Raw API Playground 在 live mode 下直接复用服务器 Cortex authentication 
 
 当前 Cortex attempt 仍会为每个真实 HTTP request 创建并关闭一个 `httpx.Client`。这是已知性能/连接复用改进项，不是当前 correctness blocker；后续引入 persistent client 时必须保持上述 limiter、retry、auth 和 shutdown 语义不变。
 
+## 自动 CI Gate
+
+每个 PR 与每次 push 到 `master` 的 GitHub Actions 链路为：
+
+```text
+Python compile
+→ Ruff
+→ pytest
+→ Node unit / architecture tests
+→ Playwright Chromium smoke
+→ secret scan
+→ git diff --check
+```
+
+其中：
+
+- pytest 负责 backend/domain/storage/API/integration；
+- Node 直接执行 production `compare-core.js`，并保护 split-module architecture；
+- Playwright 负责真实 Chromium boot、interaction、render、request serialization 与 runtime errors；
+- GitHub runner 没有 licensed production `data/`，因此 raw/history audit、backup/restore drill 仍是独立 operations Gate。
+
+CI green 是发布必要条件，但**不是 persistent-volume durability 的替代品**。
+
 ## 发布前 Gate
 
-GitHub Actions 是默认自动 Gate，每个 PR 与每次 push 到 `master` 执行 install、compile、Ruff 与 pytest。本机发布前建议额外执行：
+本机/部署主机在有完整开发依赖时建议执行：
 
 ```powershell
-python -m pytest -q
-python -m ruff check .
 python -m compileall -q app scripts tests
+python -m ruff check .
+python -m pytest -q
+npm install --no-package-lock --no-audit --no-fund
+npm run test:js
+npx playwright install chromium
+npm run test:browser
 python scripts/secret_scan.py
 python scripts/audit_raw_hashes.py
 python -m pip check
 python -m pip_audit -r requirements.prod.lock --strict
 git diff --check
 ```
+
+如果部署主机不安装 Node/Playwright，则必须以对应 commit 的 GitHub Actions green workflow 作为前端 execution evidence，并在实际容器上至少完成页面 boot / static assets / representative Time Series interaction smoke。
 
 Live 数值 Gate 使用 `scripts/validate_rv.py` 和 `scripts/phase_c_api_probe.py`；报告写入 gitignored data 目录，不得提交行情值。
 
@@ -112,7 +157,8 @@ Live 数值 Gate 使用 `scripts/validate_rv.py` 和 `scripts/phase_c_api_probe.
 | `STALE DATA` | source metadata、refresh reason | 可继续研究但明确视为 stale；上游恢复后重新 refresh |
 | forward RV 尾部为空 | available-through | 未来有效 session 不足时为预期 null，不得补零 |
 | DuckDB locked | 多 worker/多写进程 | 停止额外实例，恢复单写进程 |
-| history 数据异常 | `history.duckdb`、coverage/revision | 在后续 history-audit tooling 完成前先停止 destructive cleanup，保留卷并人工检查 |
+| history 数据异常 | `history.duckdb`、coverage/revision | 在 Step 8 history-audit tooling 完成前停止 destructive cleanup，保留卷并人工检查 |
+| 页面 boot 后 JS 报错 | 浏览器 console、static module versions、CI Playwright | 确认 split JS assets 来自同一 commit；不要只替换单个 builder 文件 |
 
 ## 备份与恢复
 
@@ -132,7 +178,8 @@ Live 数值 Gate 使用 `scripts/validate_rv.py` 和 `scripts/phase_c_api_probe.
 3. 检查 `catalog.duckdb`、`history.duckdb` 可打开；
 4. 对仍存在的 raw cache 执行 hash audit；
 5. 以 fixture/local tests 验证 API 可启动；
-6. 受控 live refresh 一个已知 coordinate，确认 archive/cache 不产生异常 revision；
-7. 再开放查询。
+6. 运行页面 boot / Time Series representative smoke，确认 split static modules 无 runtime error；
+7. 受控 live refresh 一个已知 coordinate，确认 archive/cache 不产生异常 revision；
+8. 再开放查询。
 
-**当前缺口**：尚未有正式 `history_audit` / migration / backup-restore verification 工具。该项是下一工程优先级。
+**当前缺口**：尚未有正式 `history_audit` / migration / backup-restore verification 工具。该项是 Step 8 的工程优先级。
