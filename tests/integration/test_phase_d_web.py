@@ -1,7 +1,8 @@
 """Small static-contract checks for the Web shell.
 
-Behavior belongs in tests/js and tests/browser.  These tests intentionally avoid
-asserting implementation details such as function names or source-code layout.
+Behavior belongs in tests/js and tests/browser. These tests intentionally protect only
+assets and user/product contracts; they do not pretend that source strings prove runtime
+behavior.
 """
 
 from __future__ import annotations
@@ -12,28 +13,41 @@ from app.domain.disclosures import DISCLOSURES
 from app.main import app
 
 
-def _assets() -> tuple[str, str, str]:
+def _assets() -> tuple[str, dict[str, str]]:
+    names = (
+        "app.js",
+        "compare-core.js",
+        "compare-workspace.js",
+        "compare-request.js",
+        "compare-render.js",
+        "compare-builder.js",
+    )
     with TestClient(app) as client:
         html = client.get("/").text
-        app_js = client.get("/static/app.js").text
-        compare_js = client.get("/static/compare-builder.js").text
-    return html, app_js, compare_js
+        assets = {name: client.get(f"/static/{name}").text for name in names}
+    return html, assets
 
 
 def test_web_shell_and_offline_assets_are_served() -> None:
     with TestClient(app) as client:
         page = client.get("/")
-        app_js = client.get("/static/app.js")
-        compare_core = client.get("/static/compare-core.js")
-        compare_js = client.get("/static/compare-builder.js")
+        scripts = {
+            name: client.get(f"/static/{name}")
+            for name in (
+                "app.js",
+                "compare-core.js",
+                "compare-workspace.js",
+                "compare-request.js",
+                "compare-render.js",
+                "compare-builder.js",
+            )
+        }
         stylesheet = client.get("/static/styles.css")
         plotly = client.get("/static/vendor/plotly-5.24.1.min.js")
 
     html = page.text
     assert page.status_code == 200
-    assert app_js.status_code == 200
-    assert compare_core.status_code == 200
-    assert compare_js.status_code == 200
+    assert all(response.status_code == 200 for response in scripts.values())
     assert stylesheet.status_code == 200
     assert plotly.status_code == 200
     assert len(plotly.content) > 1_000_000
@@ -62,7 +76,8 @@ def test_web_capability_and_disclosure_contracts_remain_exposed() -> None:
 
 
 def test_time_series_shell_exposes_current_product_controls() -> None:
-    html, _, compare_js = _assets()
+    html, assets = _assets()
+    workspace_js = assets["compare-workspace.js"]
 
     for element_id in (
         "indicatorBuilder",
@@ -79,25 +94,29 @@ def test_time_series_shell_exposes_current_product_controls() -> None:
 
     assert '<option value="sliding">Sliding tenor</option>' in html
     assert '<option value="fixed">Fixed date</option>' in html
-    assert "MAX_CHARTS = 8" in compare_js
+    assert "MAX_CHARTS = 8" in workspace_js
 
 
 def test_main_builder_keeps_exact_coordinate_and_wire_defaults() -> None:
-    html, app_js, compare_js = _assets()
+    html, assets = _assets()
+    app_js = assets["app.js"]
+    request_js = assets["compare-request.js"]
+    render_js = assets["compare-render.js"]
+    workspace_js = assets["compare-workspace.js"]
 
-    assert "Listed expiry" in compare_js
-    assert "Observation date" in compare_js
-    assert "可直接输入任意正数，也可从下拉建议选择" in compare_js
-    assert 'volatilityConvention: "bsVol"' in compare_js
-    assert 'layout: "matrix"' in compare_js
-    assert '"bnpp"' in compare_js
+    assert "Listed expiry" in render_js
+    assert "Observation date" in render_js
+    assert "可直接输入任意正数，也可从下拉建议选择" in render_js
+    assert 'volatilityConvention: "bsVol"' in workspace_js
+    assert 'layout: "matrix"' in workspace_js
+    assert 'code_type: "bnpp"' in request_js
     assert "code_type" in app_js
     assert "不会自动换成邻近 strike 或 expiry" in app_js
     assert 'value="derived"' in html
 
 
 def test_bulk_fixed_is_presented_as_exact_request_not_guaranteed_data() -> None:
-    html, _, _ = _assets()
+    html, _ = _assets()
 
     # The exact serialized behavior is exercised in Playwright; Python only protects
     # the user-visible contract here.
@@ -105,11 +124,12 @@ def test_bulk_fixed_is_presented_as_exact_request_not_guaranteed_data() -> None:
 
 
 def test_browser_configuration_not_market_payload_is_persisted() -> None:
-    html, _, compare_js = _assets()
+    html, assets = _assets()
+    workspace_js = assets["compare-workspace.js"]
 
     assert "行情响应不保存，重新打开后会重新请求" in html
-    assert "localStorage.setItem" in compare_js
-    assert "localStorage.getItem" in compare_js
+    assert "localStorage.setItem" in workspace_js
+    assert "localStorage.getItem" in workspace_js
 
 
 def test_runtime_behavior_is_owned_by_executable_frontend_suites() -> None:
@@ -119,5 +139,6 @@ def test_runtime_behavior_is_owned_by_executable_frontend_suites() -> None:
 
     root = Path(__file__).resolve().parents[2]
     assert (root / "tests/js/frontend_statistics.test.mjs").is_file()
+    assert (root / "tests/js/frontend_architecture.test.mjs").is_file()
     assert (root / "tests/browser/time_series.spec.mjs").is_file()
     assert (root / "playwright.config.mjs").is_file()
